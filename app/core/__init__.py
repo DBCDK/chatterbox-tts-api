@@ -11,16 +11,6 @@ from .text_processing import (
 )
 from .tts_model import initialize_model, get_model
 from .version import get_version, get_version_info
-from .aliases import (
-    alias_route,
-    add_route_aliases,
-    get_all_aliases,
-    add_custom_alias,
-    add_multiple_aliases,
-    remove_alias,
-    get_endpoint_info,
-    ENDPOINT_ALIASES,
-)
 
 __all__ = [
     "get_memory_info",
@@ -34,12 +24,4 @@ __all__ = [
     "get_model",
     "get_version",
     "get_version_info",
-    "alias_route",
-    "add_route_aliases",
-    "get_all_aliases",
-    "add_custom_alias",
-    "add_multiple_aliases",
-    "remove_alias",
-    "get_endpoint_info",
-    "ENDPOINT_ALIASES",
 ]

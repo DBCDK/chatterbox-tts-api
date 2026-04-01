@@ -13,11 +13,7 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 
 from app.config import Config
-from app.core import (
-    add_route_aliases,
-    concatenate_audio_chunks,
-    split_text_into_chunks,
-)
+from app.core import concatenate_audio_chunks, split_text_into_chunks
 from app.core.text_processing import get_streaming_settings, split_text_for_streaming
 from app.core.tts_model import (
     get_default_language,
@@ -35,7 +31,6 @@ from app.models import (
 )
 
 base_router = APIRouter()
-router = add_route_aliases(base_router)
 
 
 def _audio_num_frames(audio_tensor: torch.Tensor) -> int:
@@ -268,8 +263,8 @@ async def generate_speech_sse(
     yield f"data: {usage_event.model_dump_json()}\n\n"
 
 
-@router.post(
-    "/audio/speech",
+@base_router.post(
+    "/v1/audio/speech",
     response_class=StreamingResponse,
     responses={
         200: {"content": {"audio/wav": {}, "text/event-stream": {}}},

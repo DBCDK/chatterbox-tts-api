@@ -4,17 +4,14 @@ Model listing endpoints (OpenAI compatibility)
 
 from fastapi import APIRouter
 
-from app.models import ModelsResponse, ModelInfo
-from app.core import add_route_aliases
 from app.core.tts_model import get_model_info
+from app.models import ModelInfo, ModelsResponse
 
-# Create router with aliasing support
 base_router = APIRouter()
-router = add_route_aliases(base_router)
 
 
-@router.get(
-    "/models",
+@base_router.get(
+    "/v1/models",
     response_model=ModelsResponse,
     summary="List models",
     description="List available models (OpenAI API compatibility)",

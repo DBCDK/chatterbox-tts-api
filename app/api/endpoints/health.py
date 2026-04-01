@@ -4,9 +4,9 @@ Health check and status endpoints
 
 from fastapi import APIRouter
 
-from app.models import HealthResponse
 from app.config import Config
-from app.core import get_memory_info, add_route_aliases
+from app.core import get_memory_info
+from app.models import HealthResponse
 from app.core.tts_model import (
     get_model,
     get_device,
@@ -14,16 +14,12 @@ from app.core.tts_model import (
     get_initialization_state,
     get_initialization_progress,
     get_initialization_error,
-    is_ready,
-    is_initializing,
 )
 
-# Create router with aliasing support
 base_router = APIRouter()
-router = add_route_aliases(base_router)
 
 
-@router.get(
+@base_router.get(
     "/health",
     response_model=HealthResponse,
     summary="Health check",
@@ -74,7 +70,7 @@ async def health_check():
     )
 
 
-@router.get(
+@base_router.get(
     "/ping",
     summary="Simple connectivity check",
     description="Basic connectivity test - always responds immediately",
