@@ -1,8 +1,6 @@
-"""
-Response models for API validation
-"""
+"""Response models for the active API surface."""
 
-from typing import Optional, List, Dict, Any
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 
 
@@ -35,23 +33,12 @@ class ModelsResponse(BaseModel):
     data: List[ModelInfo]
 
 
-class ConfigResponse(BaseModel):
-    """Configuration response model"""
-
-    api_info: Dict[str, Any]
-    server: Dict[str, Any]
-    model: Dict[str, Any]
-    defaults: Dict[str, Any]
-    memory_management: Dict[str, Any]
-
-
 class ErrorResponse(BaseModel):
     """Error response model"""
 
     error: Dict[str, str]
 
 
-# SSE Response Models for OpenAI compatibility
 class SSEUsageInfo(BaseModel):
     """Usage information for SSE completion event"""
 
@@ -80,104 +67,3 @@ class SSEAudioDone(BaseModel):
 
     type: str = "speech.audio.done"
     usage: SSEUsageInfo
-
-
-class TTSProgressResponse(BaseModel):
-    """TTS progress response model"""
-
-    current_chunk: int
-    total_chunks: int
-    current_step: str
-    progress_percentage: float
-    estimated_completion: Optional[float] = None
-
-
-class TTSStatusResponse(BaseModel):
-    """TTS status response model"""
-
-    status: str
-    is_processing: bool
-    request_id: Optional[str] = None
-    start_time: Optional[float] = None
-    duration_seconds: Optional[float] = None
-    text_length: Optional[int] = None
-    text_preview: Optional[str] = None
-    voice_source: Optional[str] = None
-    parameters: Optional[Dict[str, Any]] = None
-    progress: Optional[TTSProgressResponse] = None
-    error_message: Optional[str] = None
-    memory_usage: Optional[Dict[str, float]] = None
-    total_requests: int = 0
-    message: Optional[str] = None
-
-
-class TTSStatisticsResponse(BaseModel):
-    """TTS statistics response model"""
-
-    total_requests: int
-    completed_requests: int
-    error_requests: int
-    success_rate: float
-    average_duration_seconds: float
-    average_text_length: float
-    is_processing: bool
-
-
-class APIInfoResponse(BaseModel):
-    """API information response model"""
-
-    api_name: str
-    version: str
-    status: str
-    tts_status: TTSStatusResponse
-    statistics: TTSStatisticsResponse
-    memory_info: Optional[Dict[str, float]] = None
-    recent_requests: Optional[List[Dict[str, Any]]] = None
-    uptime_info: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-
-
-class VoiceLibraryItem(BaseModel):
-    """Voice library item response model"""
-
-    name: str
-    filename: str
-    original_filename: str
-    file_extension: str
-    file_size: int
-    upload_date: str
-    path: str
-    language: str = "en"
-    aliases: List[str] = []
-    exists: bool = True
-
-
-class VoiceLibraryResponse(BaseModel):
-    """Voice library listing response"""
-
-    voices: List[VoiceLibraryItem]
-    count: int
-
-
-class SupportedLanguageItem(BaseModel):
-    """Individual supported language information"""
-
-    code: str
-    name: str
-
-
-class SupportedLanguagesResponse(BaseModel):
-    """Supported languages response"""
-
-    languages: List[SupportedLanguageItem]
-    count: int
-    model_type: str
-
-
-class DefaultVoiceResponse(BaseModel):
-    """Default voice information response"""
-
-    default_voice: Optional[str]
-    source: str
-    voice_info: Optional[VoiceLibraryItem] = None
-    path: Optional[str] = None

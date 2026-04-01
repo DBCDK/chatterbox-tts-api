@@ -16,7 +16,6 @@ from app.config import Config
 from app.core import (
     add_route_aliases,
     concatenate_audio_chunks,
-    get_voice_library,
     split_text_into_chunks,
 )
 from app.core.text_processing import get_streaming_settings, split_text_for_streaming
@@ -62,23 +61,9 @@ def _ensure_model():
 def resolve_voice_path_and_language(
     voice_name: Optional[str],
 ) -> tuple[str, Optional[str]]:
-    """Resolve a voice name to a sample path and language.
-
-    This stays compatible with the long-text worker for now, but falls back to the
-    configured sample when no library voice is found.
-    """
+    """Resolve request voice selection to the configured sample path."""
     default_language = get_default_language()
-    if not voice_name:
-        return Config.VOICE_SAMPLE_PATH, default_language if is_multilingual() else None
-
-    voice_lib = get_voice_library()
-    voice_path = voice_lib.get_voice_path(voice_name)
-    voice_language = voice_lib.get_voice_language(voice_name)
-    if voice_path is None:
-        return Config.VOICE_SAMPLE_PATH, default_language if is_multilingual() else None
-    return voice_path, (
-        voice_language or default_language
-    ) if is_multilingual() else None
+    return Config.VOICE_SAMPLE_PATH, default_language if is_multilingual() else None
 
 
 def _validate_language_for_generation(language_id: Optional[str]) -> Optional[str]:
