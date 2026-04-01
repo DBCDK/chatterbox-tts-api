@@ -175,10 +175,10 @@ UV_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cu124 uv sync
    docker build -f Dockerfile.uv -t chatterbox-tts-uv .
    ```
 
-2. **Or use docker-compose**:
+2. **Or build the uv image directly**:
 
    ```bash
-   docker-compose -f docker-compose.uv.yml up -d
+   docker build -f docker/Dockerfile.uv -t chatterbox-tts-uv .
    ```
 
 3. **GPU variant**:
@@ -372,9 +372,9 @@ If you need to rollback to pip:
    rm pyproject.toml uv.lock
    ```
 
-3. **Use original Docker files**:
+3. **Use the standard Dockerfile**:
    ```bash
-   docker-compose -f docker-compose.yml up -d
+   docker build -f docker/Dockerfile -t chatterbox-tts-api .
    ```
 
 Note: If you're rolling back from FastAPI to Flask, you'll need to restore the previous Flask version of the codebase.
