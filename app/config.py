@@ -44,27 +44,9 @@ class Config:
     HF_TOKEN = (os.getenv("HF_TOKEN") or "").strip() or None
     HF_ALLOW_PATTERNS_RAW = (os.getenv("HF_ALLOW_PATTERNS") or "").strip()
 
-    # Voice library settings
-    VOICE_LIBRARY_DIR = os.getenv("VOICE_LIBRARY_DIR", "./voices")
-
-    # Long text processing settings
-    LONG_TEXT_DATA_DIR = os.getenv("LONG_TEXT_DATA_DIR", "./data/long_text_jobs")
-    LONG_TEXT_MAX_LENGTH = int(os.getenv("LONG_TEXT_MAX_LENGTH", 100000))
-    LONG_TEXT_CHUNK_SIZE = int(os.getenv("LONG_TEXT_CHUNK_SIZE", 2500))
-    LONG_TEXT_SILENCE_PADDING_MS = int(os.getenv("LONG_TEXT_SILENCE_PADDING_MS", 200))
-    LONG_TEXT_JOB_RETENTION_DAYS = int(os.getenv("LONG_TEXT_JOB_RETENTION_DAYS", 7))
-    LONG_TEXT_MAX_CONCURRENT_JOBS = int(os.getenv("LONG_TEXT_MAX_CONCURRENT_JOBS", 3))
-
     # Multilingual model settings
     USE_MULTILINGUAL_MODEL = (
         os.getenv("USE_MULTILINGUAL_MODEL", "true").lower() == "true"
-    )
-
-    # Memory management settings
-    MEMORY_CLEANUP_INTERVAL = int(os.getenv("MEMORY_CLEANUP_INTERVAL", 5))
-    CUDA_CACHE_CLEAR_INTERVAL = int(os.getenv("CUDA_CACHE_CLEAR_INTERVAL", 3))
-    ENABLE_MEMORY_MONITORING = (
-        os.getenv("ENABLE_MEMORY_MONITORING", "true").lower() == "true"
     )
 
     # CORS settings
@@ -181,38 +163,6 @@ class Config:
         if cls.MAX_TOTAL_LENGTH <= 0:
             raise ValueError(
                 f"MAX_TOTAL_LENGTH must be positive, got {cls.MAX_TOTAL_LENGTH}"
-            )
-        if cls.MEMORY_CLEANUP_INTERVAL <= 0:
-            raise ValueError(
-                f"MEMORY_CLEANUP_INTERVAL must be positive, got {cls.MEMORY_CLEANUP_INTERVAL}"
-            )
-        if cls.CUDA_CACHE_CLEAR_INTERVAL <= 0:
-            raise ValueError(
-                f"CUDA_CACHE_CLEAR_INTERVAL must be positive, got {cls.CUDA_CACHE_CLEAR_INTERVAL}"
-            )
-        if cls.LONG_TEXT_MAX_LENGTH <= cls.MAX_TOTAL_LENGTH:
-            raise ValueError(
-                f"LONG_TEXT_MAX_LENGTH ({cls.LONG_TEXT_MAX_LENGTH}) must be greater than MAX_TOTAL_LENGTH ({cls.MAX_TOTAL_LENGTH})"
-            )
-        if cls.LONG_TEXT_CHUNK_SIZE <= 0:
-            raise ValueError(
-                f"LONG_TEXT_CHUNK_SIZE must be positive, got {cls.LONG_TEXT_CHUNK_SIZE}"
-            )
-        if cls.LONG_TEXT_CHUNK_SIZE >= cls.MAX_TOTAL_LENGTH:
-            raise ValueError(
-                f"LONG_TEXT_CHUNK_SIZE ({cls.LONG_TEXT_CHUNK_SIZE}) must be less than MAX_TOTAL_LENGTH ({cls.MAX_TOTAL_LENGTH})"
-            )
-        if cls.LONG_TEXT_SILENCE_PADDING_MS < 0:
-            raise ValueError(
-                f"LONG_TEXT_SILENCE_PADDING_MS must be non-negative, got {cls.LONG_TEXT_SILENCE_PADDING_MS}"
-            )
-        if cls.LONG_TEXT_JOB_RETENTION_DAYS <= 0:
-            raise ValueError(
-                f"LONG_TEXT_JOB_RETENTION_DAYS must be positive, got {cls.LONG_TEXT_JOB_RETENTION_DAYS}"
-            )
-        if cls.LONG_TEXT_MAX_CONCURRENT_JOBS <= 0:
-            raise ValueError(
-                f"LONG_TEXT_MAX_CONCURRENT_JOBS must be positive, got {cls.LONG_TEXT_MAX_CONCURRENT_JOBS}"
             )
         model_source = cls.get_model_source()
         if model_source not in {"default", "hf_repo", "local_dir"}:
