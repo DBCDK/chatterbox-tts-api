@@ -32,6 +32,20 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 # Set working directory
 WORKDIR /app
 
+# Create an unprivileged runtime user
+RUN groupadd --gid 10001 appuser && \
+    useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin appuser
+
+# Create runtime directories and hand them to the app user before Python installs
+RUN mkdir -p /app /cache /voices /data/long_text_jobs && \
+    chown -R appuser:appuser /app /cache /voices /data
+
+ENV HOME=/home/appuser
+
+COPY --chown=appuser:appuser requirements.txt ./
+
+USER appuser
+
 # Create virtual environment
 RUN uv venv --python 3.11
 
@@ -43,30 +57,18 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 # RUN uv pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu128
 RUN uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128
 
-# Install base dependencies first
-RUN uv pip install setuptools fastapi uvicorn[standard] python-dotenv python-multipart requests psutil pydub sse-starlette
-
-# Install resemble-perth specifically (required for watermarker)
-# RUN uv pip install resemble-perth
-
-# Install chatterbox-tts using uv
-# RUN uv pip install chatterbox-tts==0.1.4
-
-# Install chatterbox-tts — with the breaking fix (pkuseg package exclusion) 
-RUN uv pip install git+https://github.com/travisvn/chatterbox-multilingual.git@exp
+# Install application Python dependencies as the unprivileged user
+RUN uv pip install -r requirements.txt
 
 # Added after the install of chatterboxx-tts to hopefully be able to use 
 RUN uv pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128
 
 # Copy application code
-COPY app/ ./app/
-COPY main.py ./
+COPY --chown=appuser:appuser app/ ./app/
+COPY --chown=appuser:appuser main.py ./
 
 # Copy voice sample if it exists (optional, can be mounted)
-COPY voice-sample.mp3 ./voice-sample.mp3
-
-# Create directories for model cache and voice library (separate from source code)
-RUN mkdir -p /cache /voices /data/long_text_jobs
+COPY --chown=appuser:appuser voice-sample.mp3 ./voice-sample.mp3
 
 # Set default environment variables (prefer CUDA)
 ENV PORT=4123

@@ -18,30 +18,37 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
+# Create an unprivileged runtime user
+RUN groupadd --gid 10001 appuser && \
+    useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin appuser
+
+# Create runtime directories and hand them to the app user before Python installs
+RUN mkdir -p /app /cache /voices /data/long_text_jobs && \
+    chown -R appuser:appuser /app /cache /voices /data
+
 # Activate the virtual environment for subsequent RUN commands
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+ENV HOME=/home/appuser
+
+COPY --chown=appuser:appuser requirements.txt ./
+
+USER appuser
 
 # Install PyTorch CPU version first (to avoid CUDA dependencies)
-RUN pip install --no-cache-dir --upgrade pip && \
+RUN python -m venv "$VIRTUAL_ENV" && \
+    pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-# Copy requirements (excluding torch/torchaudio since we installed them above)
-COPY requirements.txt ./
-RUN pip install --no-cache-dir fastapi uvicorn[standard] python-dotenv python-multipart requests psutil pydub sse-starlette
-
-# Install chatterbox-tts — with the breaking fix (pkuseg package exclusion) 
-RUN pip install git+https://github.com/travisvn/chatterbox-multilingual.git@exp
+# Install application Python dependencies as the unprivileged user
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY app/ ./app/
-COPY main.py ./
+COPY --chown=appuser:appuser app/ ./app/
+COPY --chown=appuser:appuser main.py ./
 
 # Copy voice sample if it exists (optional, can be mounted)
-COPY voice-sample.mp3 ./voice-sample.mp3
-
-# Create directories for model cache and voice library (separate from source code)
-RUN mkdir -p /cache /voices /data/long_text_jobs
+COPY --chown=appuser:appuser voice-sample.mp3 ./voice-sample.mp3
 
 # Set default environment variables (force CPU)
 ENV PORT=4123

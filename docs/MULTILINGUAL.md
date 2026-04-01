@@ -10,6 +10,8 @@
 
 Chatterbox TTS API supports multilingual text-to-speech generation across **22 languages** using the enhanced `chatterbox-tts` v0.1.4 multilingual model. This feature enables high-quality voice cloning and speech synthesis in multiple languages while maintaining full OpenAI API compatibility.
 
+The API can now also load compatible multilingual Chatterbox models from Hugging Face or from a local snapshot directory. For custom models, configure the supported languages explicitly so `/languages` and voice validation match the loaded model.
+
 ### Key Features
 
 🌍 **22 Languages Supported** - Generate speech in Arabic, Chinese, English, French, German, Italian, Japanese, Spanish, and more  
@@ -79,6 +81,13 @@ Add to your `.env` file:
 ```env
 # Multilingual TTS Configuration
 USE_MULTILINGUAL_MODEL=true   # Enable 23-language support (default: true)
+
+# Custom Hugging Face or local multilingual model
+# MODEL_SOURCE=hf_repo
+# MODEL_CLASS=multilingual
+# MODEL_REPO_ID=CoRal-project/roest-v3-chatterbox-500m
+# MODEL_SUPPORTED_LANGUAGES=da,en
+# DEFAULT_LANGUAGE=da
 ```
 
 ## API Usage

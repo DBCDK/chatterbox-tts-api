@@ -32,31 +32,44 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 # Set working directory
 WORKDIR /app
 
-# Create virtual environment
-RUN uv venv --python 3.11
+# Create an unprivileged runtime user
+RUN groupadd --gid 10001 appuser && \
+    useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin appuser
+
+# Create runtime directories and hand them to the app user before Python installs
+RUN mkdir -p /app /cache /voices /data/long_text_jobs && \
+    chown -R appuser:appuser /app /cache /voices /data
 
 # Activate the virtual environment for subsequent RUN commands
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+ENV HOME=/home/appuser
+
+COPY --chown=appuser:appuser requirements.txt ./
+
+USER appuser
+
+# Create virtual environment
+RUN uv venv --python 3.11
 
 # Install PyTorch with CUDA support using uv
-RUN uv pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+RUN uv pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124 && \
+    python - <<'PY'
+import torch
+print('torch version:', torch.__version__)
+print('torch cuda version:', torch.version.cuda)
+assert torch.version.cuda is not None, 'Installed torch is not CUDA-enabled'
+PY
 
-# Install base dependencies first
-RUN uv pip install setuptools fastapi uvicorn[standard] python-dotenv python-multipart requests psutil pydub sse-starlette
-
-# Install chatterbox-tts — with the breaking fix (pkuseg package exclusion) 
-RUN uv pip install git+https://github.com/travisvn/chatterbox-multilingual.git@exp
+# Install application Python dependencies as the unprivileged user
+RUN uv pip install -r requirements.txt
 
 # Copy application code
-COPY app/ ./app/
-COPY main.py ./
+COPY --chown=appuser:appuser app/ ./app/
+COPY --chown=appuser:appuser main.py ./
 
 # Copy voice sample if it exists (optional, can be mounted)
-COPY voice-sample.mp3 ./voice-sample.mp3
-
-# Create directories for model cache, voice library, and long text data (separate from source code)
-RUN mkdir -p /cache /voices /data/long_text_jobs
+COPY --chown=appuser:appuser voice-sample.mp3 ./voice-sample.mp3
 
 # Set default environment variables (prefer CUDA)
 ENV PORT=4123

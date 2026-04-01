@@ -23,6 +23,9 @@ sse-starlette>=3.0.2
 # Environment variables
 python-dotenv>=1.0.0
 
+# Hugging Face model downloads for custom model loading
+huggingface_hub>=0.30.0
+
 # Memory monitoring
 psutil>=5.9.0
 

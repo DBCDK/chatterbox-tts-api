@@ -591,11 +591,47 @@ Key environment variables (see the example files for full list):
 | ------------------------ | -------------------- | ------------------------------ |
 | `PORT`                   | `4123`               | API server port                |
 | `USE_MULTILINGUAL_MODEL` | `true`               | Enable 23-language support     |
+| `MODEL_SOURCE`           | `default`            | `default`, `hf_repo`, or `local_dir` |
+| `MODEL_CLASS`            | _derived_            | Required for `hf_repo`/`local_dir`   |
+| `MODEL_REPO_ID`          | _unset_              | Hugging Face repo to download        |
+| `MODEL_LOCAL_PATH`       | _unset_              | Local model snapshot directory       |
+| `MODEL_SUPPORTED_LANGUAGES` | _unset_           | Required for multilingual custom models |
+| `DEFAULT_LANGUAGE`       | `en`                 | Fallback language for generation     |
 | `EXAGGERATION`           | `0.5`                | Emotion intensity (0.25-2.0)   |
 | `CFG_WEIGHT`             | `0.5`                | Pace control (0.0-1.0)         |
 | `TEMPERATURE`            | `0.8`                | Sampling randomness (0.05-5.0) |
 | `VOICE_SAMPLE_PATH`      | `./voice-sample.mp3` | Voice sample for cloning       |
 | `DEVICE`                 | `auto`               | Device (auto/cuda/mps/cpu)     |
+
+### Custom Hugging Face Models
+
+You can keep the built-in Chatterbox loaders, point the API at a Hugging Face repo, or load a local snapshot directory.
+
+```env
+# Built-in default behavior
+MODEL_SOURCE=default
+
+# Custom Hugging Face repo
+MODEL_SOURCE=hf_repo
+MODEL_CLASS=multilingual
+MODEL_REPO_ID=CoRal-project/roest-v3-chatterbox-500m
+MODEL_SUPPORTED_LANGUAGES=da,en
+DEFAULT_LANGUAGE=da
+
+# Optional
+# MODEL_REVISION=main
+# HF_TOKEN=
+```
+
+For an already-downloaded model snapshot, switch to:
+
+```env
+MODEL_SOURCE=local_dir
+MODEL_CLASS=multilingual
+MODEL_LOCAL_PATH=./models/coral-roest-v3
+MODEL_SUPPORTED_LANGUAGES=da,en
+DEFAULT_LANGUAGE=da
+```
 
 <details>
 <summary><strong>🎭 Voice Cloning</strong></summary>
