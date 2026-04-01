@@ -43,9 +43,6 @@ class TTSRequest(BaseModel):
     streaming_strategy: Optional[str] = Field(
         None, description="Chunking strategy for streaming"
     )
-    streaming_buffer_size: Optional[int] = Field(
-        None, description="Number of chunks to buffer", ge=1, le=10
-    )
     streaming_quality: Optional[str] = Field(
         None, description="Speed vs quality trade-off"
     )
