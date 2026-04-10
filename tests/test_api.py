@@ -1,6 +1,6 @@
 """Integration tests for the active HTTP API surface."""
 
-from conftest import TEST_TEXTS
+from tests.conftest import TEST_TEXTS
 
 
 class TestHealthAndModels:

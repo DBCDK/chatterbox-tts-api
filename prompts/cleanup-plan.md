@@ -627,3 +627,35 @@ After the bloat removal is done, consider a second pass that is purely internal 
 - standardize the exact response header names and SSE completion payload shape
 
 That second pass should happen after feature deletion, not before.
+
+## Status Checklist
+
+### Completed
+
+- [x] Reduce the service to `POST /v1/audio/speech`
+- [x] Keep `GET /v1/models`
+- [x] Keep `GET /health`
+- [x] Keep streaming and non-streaming speech support
+- [x] Preserve default, Hugging Face repo, and local-dir model loading
+- [x] Remove voice library subsystem
+- [x] Remove long-text job subsystem
+- [x] Remove status/config/memory endpoint surface
+- [x] Remove endpoint alias framework and switch to explicit routes
+- [x] Trim `app/config.py` to active-service settings
+- [x] Add per-response usage metadata for `input_chars` and audio duration
+- [x] Add non-streaming usage headers
+- [x] Add SSE completion usage payload
+- [x] Reduce the test suite to the active API surface
+- [x] Remove frontend assets and code
+- [x] Remove obsolete docs for deleted features
+- [x] Remove docker compose files and keep Dockerfiles only
+- [x] Prune unused dependencies introduced only for deleted features
+
+### Still Worth Doing
+
+- [ ] Run the reduced pytest suite in an environment with `pytest` installed and the API available
+- [ ] Optionally add a dedicated `tests/test_usage_metadata.py` if you want usage assertions separated from endpoint coverage
+- [ ] Optionally split synthesis logic further away from HTTP routing for a cleaner internal architecture
+- [ ] Optionally replace remaining `print(...)` startup logging with structured logging
+- [ ] Optionally normalize all remaining error payloads for stricter consistency
+- [ ] Optionally update `CHANGELOG.md` if you want the top-level repo history to emphasize the new minimal scope

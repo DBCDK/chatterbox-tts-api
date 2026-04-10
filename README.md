@@ -123,9 +123,9 @@ DEFAULT_LANGUAGE=da
 
 ## Docker
 
-Only Dockerfiles are maintained in `docker/`.
+One maintained GPU-capable Dockerfile is provided in `docker/Dockerfile`.
 
-Build the variant you want directly, for example:
+Build and run it directly:
 
 ```bash
 docker build -f docker/Dockerfile -t chatterbox-tts-api .

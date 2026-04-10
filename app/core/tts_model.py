@@ -4,6 +4,7 @@ TTS model initialization and management
 
 import asyncio
 import os
+import traceback
 from enum import Enum
 from typing import Any, Dict, Optional
 
@@ -196,6 +197,7 @@ async def initialize_model():
         _initialization_error = str(e)
         _initialization_progress = f"Failed: {str(e)}"
         print(f"Failed to initialize model: {e}")
+        traceback.print_exc()
         raise e
 
 

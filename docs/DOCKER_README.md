@@ -1,6 +1,6 @@
 # Docker Deployment
 
-Only Dockerfiles are maintained in `docker/`.
+One maintained GPU-capable Dockerfile is provided in `docker/Dockerfile`.
 
 ## Quick start
 
@@ -20,4 +20,4 @@ curl -X POST http://localhost:4123/v1/audio/speech \
   --output test.wav
 ```
 
-Other image variants can be built from the other Dockerfiles in `docker/`, such as `Dockerfile.uv`, `Dockerfile.gpu`, `Dockerfile.cpu`, and `Dockerfile.blackwell`.
+If you want to use a Hugging Face model, pass `MODEL_SOURCE=hf_repo`, `MODEL_CLASS`, and `MODEL_REPO_ID` when you run the container.

@@ -2,7 +2,7 @@
 
 import json
 
-from conftest import TEST_TEXTS
+from tests.conftest import TEST_TEXTS
 
 
 class TestSpeechStreaming:
