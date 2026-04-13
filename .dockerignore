@@ -80,4 +80,4 @@ temp/
 # Large test files
 *.wav
 *.mp3
-!voice-sample.mp3 
+!speech.wav 

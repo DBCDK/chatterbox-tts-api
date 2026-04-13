@@ -43,19 +43,19 @@ COPY --chown=appuser:appuser requirements.txt ./
 USER appuser
 
 RUN python3 -m venv "$VIRTUAL_ENV" && \
-    pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir --upgrade pip setuptools==79.0.1 wheel && \
     pip install --no-cache-dir fastapi uvicorn[standard] python-dotenv python-multipart requests psutil pydub sse-starlette && \
     pip install git+https://github.com/travisvn/chatterbox-multilingual.git@exp
 
 COPY --chown=appuser:appuser app/ ./app/
 COPY --chown=appuser:appuser main.py ./
-COPY --chown=appuser:appuser voice-sample.mp3 ./voice-sample.mp3
+COPY --chown=appuser:appuser speech.wav ./speech.wav
 
 ENV HOST=0.0.0.0
 ENV PORT=4123
 ENV DEVICE=cuda
 ENV CORS_ORIGINS=*
-ENV VOICE_SAMPLE_PATH=/app/voice-sample.mp3
+ENV VOICE_SAMPLE_PATH=/app/speech.wav
 ENV MODEL_CACHE_DIR=/cache
 ENV MODEL_SOURCE=default
 ENV USE_MULTILINGUAL_MODEL=true
