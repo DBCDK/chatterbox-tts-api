@@ -13,6 +13,7 @@ from chatterbox.tts import ChatterboxTTS
 from huggingface_hub import snapshot_download
 
 from app.config import Config, detect_device
+from app.core.chatterbox_patches import apply_chatterbox_patches
 from app.core.mtl import SUPPORTED_LANGUAGES
 
 # Global model instance
@@ -115,6 +116,7 @@ async def initialize_model():
         _initialization_progress = "Validating configuration..."
 
         Config.validate()
+        apply_chatterbox_patches()
         _device = detect_device()
         model_source = Config.get_model_source()
         model_class = Config.get_model_class()
