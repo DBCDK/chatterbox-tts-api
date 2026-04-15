@@ -100,9 +100,11 @@ def test_request_failure_releases_healthy_lease(monkeypatch):
     async def scenario():
         await tts_model.initialize_model()
         lease = await tts_model.acquire_model_lease(0)
+        context = speech._new_request_context(mode="audio")
 
         with pytest.raises(RuntimeError, match="wav write failed"):
             await speech._generate_full_audio(
+                context=context,
                 lease=lease,
                 text="Sentence one. Sentence two.",
                 voice_sample_path=Config.VOICE_SAMPLE_PATH,
@@ -164,8 +166,10 @@ def test_non_streaming_request_keeps_one_stable_model(monkeypatch):
     async def scenario():
         await tts_model.initialize_model()
         lease = await tts_model.acquire_model_lease(0)
+        context = speech._new_request_context(mode="audio")
 
         await speech._generate_full_audio(
+            context=context,
             lease=lease,
             text=long_text,
             voice_sample_path=Config.VOICE_SAMPLE_PATH,
@@ -193,9 +197,11 @@ def test_sse_request_keeps_one_stable_model(monkeypatch):
     async def scenario():
         await tts_model.initialize_model()
         lease = await tts_model.acquire_model_lease(0)
+        context = speech._new_request_context(mode="sse")
 
         events = []
         async for event in speech.generate_speech_sse(
+            context=context,
             lease=lease,
             text="Sentence one. Sentence two. Sentence three.",
             voice_sample_path=Config.VOICE_SAMPLE_PATH,

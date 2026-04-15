@@ -57,10 +57,18 @@ Completed in the current branch:
 - pool-aware readiness in `/health`
 - overload rejection when all model instances are busy
 - basic pool-focused test coverage
+- configurable total request timeout
+- timeout budget that includes model lease wait time
+- `504` timeout responses for non-streaming requests
+- SSE timeout and disconnect termination without `speech.audio.done`
+- lease-safe cleanup on timeout and disconnect
+- focused timeout and disconnect test coverage
 
 This means the original readiness and overload work that was previously described as a separate Phase 2 is now considered part of the completed Phase 1 implementation.
 
-The next implementation step in this document is therefore request timeouts and cancellation handling.
+Phase 2 in this document is now also implemented.
+
+The next implementation step in this document is therefore memory-risk reduction and broader observability hardening.
 
 ## Phase 1: Replace The Shared Model With A Bounded Model Pool (Completed)
 
@@ -291,7 +299,7 @@ The current implementation already includes these previously planned readiness a
 
 Remaining readiness refinements can be handled later with deployment and observability work rather than as a separate next phase.
 
-## Phase 2: Add Request Timeouts And Cancellation Handling
+## Phase 2: Add Request Timeouts And Cancellation Handling (Completed)
 
 ### Objective
 
@@ -462,9 +470,20 @@ Required tests:
 - generation exceptions still follow the existing broken-instance policy and are not confused with timeout behavior
 - a timeout does not retire an otherwise healthy model instance
 
-### Open Decisions To Confirm Before Implementation
+### Completed Notes
 
-Phase 2 is specific enough to build with the chosen defaults above. Separate timeout values for streaming and non-streaming can be revisited later only if real traffic shows a clear need.
+The current implementation includes these Phase 2 behaviors:
+
+- `REQUEST_TIMEOUT_SECONDS` configuration and validation
+- total request timeout that starts after validation and includes lease wait time
+- `504` timeout responses for non-streaming requests
+- SSE timeout and disconnect termination without `speech.audio.done`
+- lease cleanup after timeout, disconnect, and normal completion
+- timeout handling that does not retire otherwise healthy model instances
+- request-scoped timeout and disconnect logging
+- unit coverage for non-streaming timeout, lease-wait timeout, SSE timeout, and SSE disconnect
+
+Separate timeout values for streaming and non-streaming can be revisited later only if real traffic shows a clear need.
 
 ### Acceptance Criteria
 
@@ -606,12 +625,11 @@ Verify the chosen safety limits with real behavior instead of assumptions.
 
 Implement the work in this order:
 
-1. Add request timeout handling.
-2. Stop or curtail work on SSE client disconnects.
-3. Add structured request logging.
-4. Add overload and timeout tests.
-5. Run small-scale concurrency validation and tune pool size.
-6. Document deployment constraints and recommended production settings.
+1. Keep input-size and memory limits conservative under pooled load.
+2. Add broader structured request logging and metrics.
+3. Run small-scale concurrency validation and tune pool size.
+4. Document deployment constraints and recommended production settings.
+5. Revisit timeout tuning only if real traffic shows mode-specific needs.
 
 ## Explicit Non-Goals For The Minimal Version
 
@@ -645,12 +663,12 @@ Keep them validated in `app/config.py` and expose the non-sensitive values in `/
 - [x] Return explicit overload errors when all model instances are busy
 - [x] Make readiness clearly distinguishable from liveness at the application level
 - [x] Expose pool status through `/health`
-- [ ] Add a configurable total request timeout
-- [ ] Stop or curtail work on SSE client disconnects
-- [ ] Ensure failures and timeouts release request-scoped resources and return leased models to the pool
+- [x] Add a configurable total request timeout
+- [x] Stop or curtail work on SSE client disconnects
+- [x] Ensure failures and timeouts release request-scoped resources and return leased models to the pool
 - [ ] Keep input-size limits conservative and documented
 - [ ] Add structured request logging without logging full input text
 - [ ] Measure VRAM usage as pool size increases
-- [ ] Add overload and timeout test coverage
+- [x] Add overload and timeout test coverage
 - [ ] Run small concurrency validation and tune the safe pool size
 - [ ] Document production deployment constraints and recommended env values

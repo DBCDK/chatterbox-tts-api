@@ -62,6 +62,7 @@ async def health_check():
             "max_total_length": Config.MAX_TOTAL_LENGTH,
             "model_instance_count": Config.MODEL_INSTANCE_COUNT,
             "max_queue_wait_seconds": Config.MAX_QUEUE_WAIT_SECONDS,
+            "request_timeout_seconds": Config.REQUEST_TIMEOUT_SECONDS,
             "voice_sample_path": Config.VOICE_SAMPLE_PATH,
             "default_exaggeration": Config.EXAGGERATION,
             "default_cfg_weight": Config.CFG_WEIGHT,
