@@ -27,6 +27,8 @@ class Config:
     # Text processing
     MAX_CHUNK_LENGTH = int(os.getenv("MAX_CHUNK_LENGTH", 280))
     MAX_TOTAL_LENGTH = int(os.getenv("MAX_TOTAL_LENGTH", 3000))
+    MODEL_INSTANCE_COUNT = int(os.getenv("MODEL_INSTANCE_COUNT", 2))
+    MAX_QUEUE_WAIT_SECONDS = float(os.getenv("MAX_QUEUE_WAIT_SECONDS", 10))
 
     # Voice and model settings
     VOICE_SAMPLE_PATH = os.getenv("VOICE_SAMPLE_PATH", "./voice-sample.mp3")
@@ -163,6 +165,15 @@ class Config:
         if cls.MAX_TOTAL_LENGTH <= 0:
             raise ValueError(
                 f"MAX_TOTAL_LENGTH must be positive, got {cls.MAX_TOTAL_LENGTH}"
+            )
+        if cls.MODEL_INSTANCE_COUNT <= 0:
+            raise ValueError(
+                f"MODEL_INSTANCE_COUNT must be positive, got {cls.MODEL_INSTANCE_COUNT}"
+            )
+        if cls.MAX_QUEUE_WAIT_SECONDS < 0:
+            raise ValueError(
+                "MAX_QUEUE_WAIT_SECONDS must be non-negative, "
+                f"got {cls.MAX_QUEUE_WAIT_SECONDS}"
             )
         model_source = cls.get_model_source()
         if model_source not in {"default", "hf_repo", "local_dir"}:

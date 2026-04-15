@@ -1,10 +1,12 @@
 """
-TTS model initialization and management
+TTS model initialization and pooled model management.
 """
 
 import asyncio
 import os
 import traceback
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional
 
@@ -13,10 +15,9 @@ from chatterbox.tts import ChatterboxTTS
 from huggingface_hub import snapshot_download
 
 from app.config import Config, detect_device
-from app.core.chatterbox_patches import apply_chatterbox_patches
 from app.core.mtl import SUPPORTED_LANGUAGES
 
-# Global model instance
+# Backwards-compatible primary model reference.
 _model = None
 _device = None
 _initialization_state = "not_started"
@@ -34,6 +35,8 @@ _model_metadata: Dict[str, Any] = {
     "resolved_model_path": None,
     "default_language": "en",
 }
+_model_pool: list["ModelSlot"] = []
+_available_model_ids: Optional[asyncio.Queue[int]] = None
 
 
 class InitializationState(Enum):
@@ -41,6 +44,67 @@ class InitializationState(Enum):
     INITIALIZING = "initializing"
     READY = "ready"
     ERROR = "error"
+
+
+class ModelPoolError(RuntimeError):
+    """Base error for model pool failures."""
+
+
+class ModelNotReadyError(ModelPoolError):
+    """Raised when the model pool cannot serve requests."""
+
+
+class ModelPoolExhaustedError(ModelPoolError):
+    """Raised when no model lease is available within the timeout."""
+
+
+@dataclass
+class ModelSlot:
+    instance_id: int
+    model: Any
+    device: str
+    healthy: bool = True
+    last_error: Optional[str] = None
+
+
+@dataclass
+class ModelLease:
+    instance_id: int
+    model: Any
+    device: str
+    broken: bool = False
+    failure_reason: Optional[str] = None
+    released: bool = False
+
+    def mark_broken(self, reason: str):
+        self.broken = True
+        self.failure_reason = reason
+
+
+def _reset_runtime_state():
+    global _model, _device, _initialization_state, _initialization_error
+    global _initialization_progress, _is_multilingual, _supported_languages
+    global _model_metadata, _model_pool, _available_model_ids
+
+    _model = None
+    _device = None
+    _initialization_state = InitializationState.NOT_STARTED.value
+    _initialization_error = None
+    _initialization_progress = ""
+    _is_multilingual = None
+    _supported_languages = {}
+    _model_metadata = {
+        "model_source": "default",
+        "model_class": None,
+        "model_type": None,
+        "model_repo_id": None,
+        "model_revision": None,
+        "model_local_path": None,
+        "resolved_model_path": None,
+        "default_language": "en",
+    }
+    _model_pool = []
+    _available_model_ids = None
 
 
 def _get_model_loader(model_class: str):
@@ -101,33 +165,79 @@ def _load_model_sync(
     raise ValueError(f"Unsupported MODEL_SOURCE: {model_source}")
 
 
-async def initialize_model():
-    """Initialize the Chatterbox TTS model"""
-    global \
-        _model, \
-        _device, \
-        _initialization_state, \
-        _initialization_error, \
-        _initialization_progress
-    global _is_multilingual, _supported_languages, _model_metadata
+def _configure_cpu_loading(device: str):
+    if device != "cpu":
+        return
+
+    import torch
+
+    original_load = torch.load
+    original_load_file = None
 
     try:
+        import safetensors.torch
+
+        original_load_file = safetensors.torch.load_file
+    except ImportError:
+        pass
+
+    def force_cpu_torch_load(f, map_location=None, **kwargs):
+        return original_load(f, map_location="cpu", **kwargs)
+
+    def force_cpu_load_file(filename, device=None):
+        return original_load_file(filename, device="cpu")
+
+    torch.load = force_cpu_torch_load
+    if original_load_file:
+        safetensors.torch.load_file = force_cpu_load_file
+
+
+def _healthy_slot_count() -> int:
+    return sum(1 for slot in _model_pool if slot.healthy)
+
+
+def _available_slot_count() -> int:
+    if _available_model_ids is None:
+        return 0
+    return _available_model_ids.qsize()
+
+
+def _update_runtime_after_slot_failure(instance_id: int, reason: str):
+    global _initialization_state, _initialization_error, _initialization_progress
+
+    healthy_count = _healthy_slot_count()
+    _initialization_error = f"Model instance {instance_id} failed: {reason}"
+    if healthy_count <= 0:
+        _initialization_state = InitializationState.ERROR.value
+        _initialization_progress = "No healthy model instances available"
+    else:
+        _initialization_progress = f"Degraded pool capacity: {healthy_count}/{len(_model_pool)} instances healthy"
+
+
+async def initialize_model():
+    """Initialize the configured pool of Chatterbox TTS models."""
+    global _model, _device, _initialization_state, _initialization_error
+    global _initialization_progress, _is_multilingual, _supported_languages
+    global _model_metadata, _model_pool, _available_model_ids
+
+    try:
+        _reset_runtime_state()
         _initialization_state = InitializationState.INITIALIZING.value
         _initialization_progress = "Validating configuration..."
 
         Config.validate()
-        apply_chatterbox_patches()
         _device = detect_device()
         model_source = Config.get_model_source()
         model_class = Config.get_model_class()
         default_language = Config.get_default_language()
 
-        print("Initializing Chatterbox TTS model...")
+        print("Initializing Chatterbox TTS model pool...")
         print(f"Device: {_device}")
         print(f"Voice sample: {Config.VOICE_SAMPLE_PATH}")
         print(f"Model cache: {Config.MODEL_CACHE_DIR}")
         print(f"Model source: {model_source}")
         print(f"Model class: {model_class}")
+        print(f"Model instances: {Config.MODEL_INSTANCE_COUNT}")
         if Config.MODEL_REPO_ID:
             print(f"Model repo: {Config.MODEL_REPO_ID}")
         if Config.MODEL_LOCAL_PATH:
@@ -148,39 +258,35 @@ async def initialize_model():
             )
 
         _initialization_progress = "Configuring device compatibility..."
-        if _device == "cpu":
-            import torch
+        _configure_cpu_loading(_device)
 
-            original_load = torch.load
-            original_load_file = None
+        loop = asyncio.get_running_loop()
+        loaded_slots: list[ModelSlot] = []
+        available_ids: asyncio.Queue[int] = asyncio.Queue()
+        model_metadata: Optional[Dict[str, Any]] = None
 
-            try:
-                import safetensors.torch
+        for instance_id in range(Config.MODEL_INSTANCE_COUNT):
+            _initialization_progress = (
+                f"Loading TTS model {instance_id + 1}/{Config.MODEL_INSTANCE_COUNT}..."
+            )
+            model, model_metadata = await loop.run_in_executor(
+                None,
+                lambda ms=model_source, mc=model_class, dv=_device: _load_model_sync(
+                    ms, mc, dv
+                ),
+            )
+            loaded_slots.append(
+                ModelSlot(instance_id=instance_id, model=model, device=_device)
+            )
+            available_ids.put_nowait(instance_id)
 
-                original_load_file = safetensors.torch.load_file
-            except ImportError:
-                pass
-
-            def force_cpu_torch_load(f, map_location=None, **kwargs):
-                return original_load(f, map_location="cpu", **kwargs)
-
-            def force_cpu_load_file(filename, device=None):
-                return original_load_file(filename, device="cpu")
-
-            torch.load = force_cpu_torch_load
-            if original_load_file:
-                safetensors.torch.load_file = force_cpu_load_file
-
-        _initialization_progress = "Loading TTS model (this may take a while)..."
-        loop = asyncio.get_event_loop()
-        _model, model_metadata = await loop.run_in_executor(
-            None, lambda: _load_model_sync(model_source, model_class, _device)
-        )
-
+        _model_pool = loaded_slots
+        _available_model_ids = available_ids
+        _model = loaded_slots[0].model if loaded_slots else None
         _is_multilingual = model_class == "multilingual"
         _supported_languages = _resolve_supported_languages(model_source, model_class)
         _model_metadata = {
-            **model_metadata,
+            **(model_metadata or {}),
             "default_language": default_language,
         }
 
@@ -189,64 +295,158 @@ async def initialize_model():
             print(f"Resolved model path: {_model_metadata['resolved_model_path']}")
 
         _initialization_state = InitializationState.READY.value
-        _initialization_progress = "Model ready"
+        _initialization_progress = (
+            f"Model pool ready ({len(_model_pool)}/{Config.MODEL_INSTANCE_COUNT})"
+        )
         _initialization_error = None
-        print(f"Model initialized successfully on {_device}")
+        print(
+            f"Model pool initialized successfully on {_device} with {len(_model_pool)} instances"
+        )
         return _model
 
     except Exception as e:
         _initialization_state = InitializationState.ERROR.value
         _initialization_error = str(e)
         _initialization_progress = f"Failed: {str(e)}"
-        print(f"Failed to initialize model: {e}")
+        _model = None
+        _model_pool = []
+        _available_model_ids = None
+        print(f"Failed to initialize model pool: {e}")
         traceback.print_exc()
         raise e
 
 
+async def acquire_model_lease(timeout_seconds: Optional[float] = None) -> ModelLease:
+    """Lease one healthy model instance for a full request."""
+    if not is_ready() or _available_model_ids is None:
+        raise ModelNotReadyError("Model pool not ready")
+
+    wait_seconds = (
+        Config.MAX_QUEUE_WAIT_SECONDS if timeout_seconds is None else timeout_seconds
+    )
+    queue = _available_model_ids
+
+    while True:
+        try:
+            if wait_seconds <= 0:
+                instance_id = queue.get_nowait()
+            else:
+                instance_id = await asyncio.wait_for(queue.get(), timeout=wait_seconds)
+        except asyncio.QueueEmpty as exc:
+            raise ModelPoolExhaustedError("No model instances available") from exc
+        except asyncio.TimeoutError as exc:
+            raise ModelPoolExhaustedError(
+                "Timed out waiting for an available model instance"
+            ) from exc
+
+        if instance_id >= len(_model_pool):
+            continue
+
+        slot = _model_pool[instance_id]
+        if not slot.healthy:
+            continue
+
+        return ModelLease(
+            instance_id=slot.instance_id,
+            model=slot.model,
+            device=slot.device,
+        )
+
+
+async def release_model_lease(lease: Optional[ModelLease]):
+    """Release a model lease or retire the slot if it failed."""
+    if lease is None or lease.released:
+        return
+
+    lease.released = True
+    if lease.instance_id >= len(_model_pool):
+        return
+
+    slot = _model_pool[lease.instance_id]
+    if lease.broken:
+        slot.healthy = False
+        slot.last_error = lease.failure_reason
+        _update_runtime_after_slot_failure(
+            lease.instance_id, lease.failure_reason or ""
+        )
+        return
+
+    if slot.healthy and _available_model_ids is not None:
+        _available_model_ids.put_nowait(lease.instance_id)
+
+
+@asynccontextmanager
+async def leased_model(timeout_seconds: Optional[float] = None):
+    lease = await acquire_model_lease(timeout_seconds)
+    try:
+        yield lease
+    finally:
+        await release_model_lease(lease)
+
+
+def get_pool_status() -> Dict[str, Any]:
+    """Return the current model pool state for health checks."""
+    healthy_instances = _healthy_slot_count()
+    available_instances = _available_slot_count()
+    busy_instances = max(healthy_instances - available_instances, 0)
+    unhealthy_instances = max(len(_model_pool) - healthy_instances, 0)
+    return {
+        "configured_instances": Config.MODEL_INSTANCE_COUNT,
+        "loaded_instances": len(_model_pool),
+        "healthy_instances": healthy_instances,
+        "available_instances": available_instances,
+        "busy_instances": busy_instances,
+        "unhealthy_instances": unhealthy_instances,
+        "ready": is_ready(),
+    }
+
+
 def get_model():
-    """Get the current model instance"""
+    """Get the primary model instance for compatibility call sites."""
     return _model
 
 
 def get_device():
-    """Get the current device"""
+    """Get the current device."""
     return _device
 
 
 def get_initialization_state():
-    """Get the current initialization state"""
+    """Get the current initialization state."""
     return _initialization_state
 
 
 def get_initialization_progress():
-    """Get the current initialization progress message"""
+    """Get the current initialization progress message."""
     return _initialization_progress
 
 
 def get_initialization_error():
-    """Get the initialization error if any"""
+    """Get the initialization or latest pool error."""
     return _initialization_error
 
 
 def is_ready():
-    """Check if the model is ready for use"""
+    """Check if the model pool can currently accept work."""
     return (
-        _initialization_state == InitializationState.READY.value and _model is not None
+        _initialization_state == InitializationState.READY.value
+        and _healthy_slot_count() > 0
+        and _available_model_ids is not None
     )
 
 
 def is_initializing():
-    """Check if the model is currently initializing"""
+    """Check if the model pool is currently initializing."""
     return _initialization_state == InitializationState.INITIALIZING.value
 
 
 def is_multilingual():
-    """Check if the loaded model supports multilingual generation"""
+    """Check if the loaded model supports multilingual generation."""
     return _is_multilingual
 
 
 def get_supported_languages():
-    """Get the dictionary of supported languages"""
+    """Get the dictionary of supported languages."""
     if _supported_languages:
         return _supported_languages.copy()
     return _resolve_supported_languages(
@@ -256,12 +456,12 @@ def get_supported_languages():
 
 
 def get_default_language():
-    """Get the default generation language"""
+    """Get the default generation language."""
     return _model_metadata.get("default_language") or Config.get_default_language()
 
 
 def supports_language(language_id: str):
-    """Check if the model supports a specific language"""
+    """Check if the model supports a specific language."""
     if not language_id:
         return False
     supported_languages = get_supported_languages() or _resolve_supported_languages(
@@ -272,7 +472,7 @@ def supports_language(language_id: str):
 
 
 def get_model_info() -> Dict[str, Any]:
-    """Get comprehensive model information"""
+    """Get comprehensive model information."""
     configured_model_class = (
         _model_metadata.get("model_class") or Config.get_model_class()
     )
@@ -304,5 +504,31 @@ def get_model_info() -> Dict[str, Any]:
         "device": _device,
         "is_ready": is_ready(),
         "initialization_state": _initialization_state,
+        "model_instance_count": Config.MODEL_INSTANCE_COUNT,
+        "pool_status": get_pool_status(),
         **resolved_metadata,
     }
+
+
+__all__ = [
+    "ModelLease",
+    "ModelNotReadyError",
+    "ModelPoolExhaustedError",
+    "acquire_model_lease",
+    "get_default_language",
+    "get_device",
+    "get_initialization_error",
+    "get_initialization_progress",
+    "get_initialization_state",
+    "get_model",
+    "get_model_info",
+    "get_pool_status",
+    "get_supported_languages",
+    "initialize_model",
+    "is_initializing",
+    "is_multilingual",
+    "is_ready",
+    "leased_model",
+    "release_model_lease",
+    "supports_language",
+]

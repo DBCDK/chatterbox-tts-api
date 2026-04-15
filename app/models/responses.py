@@ -8,9 +8,11 @@ class HealthResponse(BaseModel):
     """Health check response model"""
 
     status: str
+    ready: bool
     model_loaded: bool
     device: str
     config: Dict[str, Any]
+    pool_status: Optional[Dict[str, Any]] = None
     memory_info: Optional[Dict[str, float]] = None
     initialization_state: Optional[str] = None
     initialization_progress: Optional[str] = None

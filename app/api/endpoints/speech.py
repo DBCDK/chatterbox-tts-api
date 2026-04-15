@@ -16,9 +16,14 @@ from app.config import Config
 from app.core import concatenate_audio_chunks, split_text_into_chunks
 from app.core.text_processing import get_streaming_settings, split_text_for_streaming
 from app.core.tts_model import (
+    ModelLease,
+    ModelNotReadyError,
+    ModelPoolExhaustedError,
+    acquire_model_lease,
     get_default_language,
-    get_model,
     is_multilingual,
+    leased_model,
+    release_model_lease,
     supports_language,
 )
 from app.models import (
@@ -43,14 +48,45 @@ def _audio_duration_seconds(audio_tensor: torch.Tensor, sample_rate: int) -> flo
     return _audio_num_frames(audio_tensor) / float(sample_rate)
 
 
-def _ensure_model():
-    model = get_model()
-    if model is None:
+def _model_not_ready_http_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={"error": {"message": "Model pool not ready", "type": "model_error"}},
+    )
+
+
+def _model_capacity_http_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "error": {
+                "message": "No model instances available for this request",
+                "type": "capacity_error",
+            }
+        },
+    )
+
+
+async def _acquire_request_lease() -> ModelLease:
+    try:
+        return await acquire_model_lease(Config.MAX_QUEUE_WAIT_SECONDS)
+    except ModelNotReadyError as exc:
+        raise _model_not_ready_http_error() from exc
+    except ModelPoolExhaustedError as exc:
+        raise _model_capacity_http_error() from exc
+
+
+def _validate_text_length(text: str):
+    if len(text) > Config.MAX_TOTAL_LENGTH:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"error": {"message": "Model not loaded", "type": "model_error"}},
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": {
+                    "message": f"Input text too long. Maximum {Config.MAX_TOTAL_LENGTH} characters allowed.",
+                    "type": "invalid_request_error",
+                }
+            },
         )
-    return model
 
 
 def resolve_voice_path_and_language(
@@ -102,6 +138,7 @@ def _generation_kwargs(
 
 
 async def _generate_chunk_audio(
+    lease: ModelLease,
     chunk: str,
     voice_sample_path: str,
     language_id: Optional[str],
@@ -109,23 +146,26 @@ async def _generate_chunk_audio(
     cfg_weight: Optional[float],
     temperature: Optional[float],
 ) -> torch.Tensor:
-    model = _ensure_model()
     loop = asyncio.get_running_loop()
 
-    with torch.no_grad():
-        audio_tensor = await loop.run_in_executor(
-            None,
-            lambda: model.generate(
-                **_generation_kwargs(
-                    text=chunk,
-                    voice_sample_path=voice_sample_path,
-                    language_id=language_id,
-                    exaggeration=exaggeration,
-                    cfg_weight=cfg_weight,
-                    temperature=temperature,
-                )
-            ),
-        )
+    try:
+        with torch.no_grad():
+            audio_tensor = await loop.run_in_executor(
+                None,
+                lambda: lease.model.generate(
+                    **_generation_kwargs(
+                        text=chunk,
+                        voice_sample_path=voice_sample_path,
+                        language_id=language_id,
+                        exaggeration=exaggeration,
+                        cfg_weight=cfg_weight,
+                        temperature=temperature,
+                    )
+                ),
+            )
+    except Exception as exc:
+        lease.mark_broken(str(exc))
+        raise
 
     return (
         audio_tensor.detach().cpu() if hasattr(audio_tensor, "detach") else audio_tensor
@@ -133,6 +173,7 @@ async def _generate_chunk_audio(
 
 
 async def _generate_full_audio(
+    lease: ModelLease,
     text: str,
     voice_sample_path: str,
     language_id: Optional[str],
@@ -140,17 +181,7 @@ async def _generate_full_audio(
     cfg_weight: Optional[float],
     temperature: Optional[float],
 ) -> tuple[io.BytesIO, float]:
-    model = _ensure_model()
-    if len(text) > Config.MAX_TOTAL_LENGTH:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": {
-                    "message": f"Input text too long. Maximum {Config.MAX_TOTAL_LENGTH} characters allowed.",
-                    "type": "invalid_request_error",
-                }
-            },
-        )
+    _validate_text_length(text)
 
     chunks = split_text_into_chunks(text, Config.MAX_CHUNK_LENGTH)
     audio_chunks: list[torch.Tensor] = []
@@ -158,6 +189,7 @@ async def _generate_full_audio(
         for chunk in chunks:
             audio_chunks.append(
                 await _generate_chunk_audio(
+                    lease=lease,
                     chunk=chunk,
                     voice_sample_path=voice_sample_path,
                     language_id=language_id,
@@ -168,14 +200,14 @@ async def _generate_full_audio(
             )
 
         final_audio = (
-            concatenate_audio_chunks(audio_chunks, model.sr)
+            concatenate_audio_chunks(audio_chunks, lease.model.sr)
             if len(audio_chunks) > 1
             else audio_chunks[0]
         )
         buffer = io.BytesIO()
-        ta.save(buffer, final_audio, model.sr, format="wav")
+        ta.save(buffer, final_audio, lease.model.sr, format="wav")
         buffer.seek(0)
-        return buffer, _audio_duration_seconds(final_audio, model.sr)
+        return buffer, _audio_duration_seconds(final_audio, lease.model.sr)
     finally:
         audio_chunks.clear()
 
@@ -188,18 +220,21 @@ async def generate_speech_internal(
     cfg_weight: Optional[float] = None,
     temperature: Optional[float] = None,
 ) -> io.BytesIO:
-    buffer, _ = await _generate_full_audio(
-        text=text,
-        voice_sample_path=voice_sample_path,
-        language_id=_validate_language_for_generation(language_id),
-        exaggeration=exaggeration,
-        cfg_weight=cfg_weight,
-        temperature=temperature,
-    )
-    return buffer
+    async with leased_model(Config.MAX_QUEUE_WAIT_SECONDS) as lease:
+        buffer, _ = await _generate_full_audio(
+            lease=lease,
+            text=text,
+            voice_sample_path=voice_sample_path,
+            language_id=_validate_language_for_generation(language_id),
+            exaggeration=exaggeration,
+            cfg_weight=cfg_weight,
+            temperature=temperature,
+        )
+        return buffer
 
 
 async def generate_speech_sse(
+    lease: ModelLease,
     text: str,
     voice_sample_path: str,
     language_id: Optional[str] = None,
@@ -210,19 +245,8 @@ async def generate_speech_sse(
     streaming_strategy: Optional[str] = None,
     streaming_quality: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
-    model = _ensure_model()
     language_id = _validate_language_for_generation(language_id)
-
-    if len(text) > Config.MAX_TOTAL_LENGTH:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": {
-                    "message": f"Input text too long. Maximum {Config.MAX_TOTAL_LENGTH} characters allowed.",
-                    "type": "invalid_request_error",
-                }
-            },
-        )
+    _validate_text_length(text)
 
     settings = get_streaming_settings(
         streaming_chunk_size,
@@ -236,31 +260,39 @@ async def generate_speech_sse(
         quality=settings["quality"],
     )
 
-    info_event = SSEAudioInfo(sample_rate=model.sr, channels=1, bits_per_sample=16)
-    yield f"data: {info_event.model_dump_json()}\n\n"
-
-    total_frames = 0
-    for chunk in text_chunks:
-        audio_tensor = await _generate_chunk_audio(
-            chunk=chunk,
-            voice_sample_path=voice_sample_path,
-            language_id=language_id,
-            exaggeration=exaggeration,
-            cfg_weight=cfg_weight,
-            temperature=temperature,
+    try:
+        info_event = SSEAudioInfo(
+            sample_rate=lease.model.sr,
+            channels=1,
+            bits_per_sample=16,
         )
-        total_frames += _audio_num_frames(audio_tensor)
-        pcm_tensor = (torch.clamp(audio_tensor, -1.0, 1.0) * 32767).to(torch.int16)
-        payload = base64.b64encode(pcm_tensor.numpy().tobytes()).decode("ascii")
-        yield f"data: {SSEAudioDelta(audio=payload).model_dump_json()}\n\n"
+        yield f"data: {info_event.model_dump_json()}\n\n"
 
-    usage_event = SSEAudioDone(
-        usage=SSEUsageInfo(
-            input_chars=len(text),
-            audio_seconds=total_frames / float(model.sr),
+        total_frames = 0
+        for chunk in text_chunks:
+            audio_tensor = await _generate_chunk_audio(
+                lease=lease,
+                chunk=chunk,
+                voice_sample_path=voice_sample_path,
+                language_id=language_id,
+                exaggeration=exaggeration,
+                cfg_weight=cfg_weight,
+                temperature=temperature,
+            )
+            total_frames += _audio_num_frames(audio_tensor)
+            pcm_tensor = (torch.clamp(audio_tensor, -1.0, 1.0) * 32767).to(torch.int16)
+            payload = base64.b64encode(pcm_tensor.numpy().tobytes()).decode("ascii")
+            yield f"data: {SSEAudioDelta(audio=payload).model_dump_json()}\n\n"
+
+        usage_event = SSEAudioDone(
+            usage=SSEUsageInfo(
+                input_chars=len(text),
+                audio_seconds=total_frames / float(lease.model.sr),
+            )
         )
-    )
-    yield f"data: {usage_event.model_dump_json()}\n\n"
+        yield f"data: {usage_event.model_dump_json()}\n\n"
+    finally:
+        await release_model_lease(lease)
 
 
 @base_router.post(
@@ -277,13 +309,17 @@ async def generate_speech_sse(
 )
 async def text_to_speech(request: TTSRequest):
     voice_sample_path, language_id = resolve_voice_path_and_language(request.voice)
+    resolved_language = _validate_language_for_generation(language_id)
+    _validate_text_length(request.input)
 
     if request.stream_format == "sse":
+        lease = await _acquire_request_lease()
         return StreamingResponse(
             generate_speech_sse(
+                lease=lease,
                 text=request.input,
                 voice_sample_path=voice_sample_path,
-                language_id=language_id,
+                language_id=resolved_language,
                 exaggeration=request.exaggeration,
                 cfg_weight=request.cfg_weight,
                 temperature=request.temperature,
@@ -296,26 +332,33 @@ async def text_to_speech(request: TTSRequest):
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
                 "X-Accel-Buffering": "no",
+                "X-Model-Instance-ID": str(lease.instance_id),
             },
         )
 
-    buffer, audio_seconds = await _generate_full_audio(
-        text=request.input,
-        voice_sample_path=voice_sample_path,
-        language_id=_validate_language_for_generation(language_id),
-        exaggeration=request.exaggeration,
-        cfg_weight=request.cfg_weight,
-        temperature=request.temperature,
-    )
-    return StreamingResponse(
-        io.BytesIO(buffer.getvalue()),
-        media_type="audio/wav",
-        headers={
-            "Content-Disposition": "attachment; filename=speech.wav",
-            "X-Usage-Input-Chars": str(len(request.input)),
-            "X-Usage-Audio-Seconds": f"{audio_seconds:.6f}",
-        },
-    )
+    lease = await _acquire_request_lease()
+    try:
+        buffer, audio_seconds = await _generate_full_audio(
+            lease=lease,
+            text=request.input,
+            voice_sample_path=voice_sample_path,
+            language_id=resolved_language,
+            exaggeration=request.exaggeration,
+            cfg_weight=request.cfg_weight,
+            temperature=request.temperature,
+        )
+        return StreamingResponse(
+            io.BytesIO(buffer.getvalue()),
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": "attachment; filename=speech.wav",
+                "X-Usage-Input-Chars": str(len(request.input)),
+                "X-Usage-Audio-Seconds": f"{audio_seconds:.6f}",
+                "X-Model-Instance-ID": str(lease.instance_id),
+            },
+        )
+    finally:
+        await release_model_lease(lease)
 
 
 __all__ = [
