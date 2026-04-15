@@ -48,7 +48,21 @@ After this work, the service should behave like this:
 5. If the client disconnects or the timeout is hit, generation stops as cleanly as possible and resources are released.
 6. The service emits logs and metrics for success, failure, timeout, and overload.
 
-## Phase 1: Replace The Shared Model With A Bounded Model Pool
+## Current Status
+
+Completed in the current branch:
+
+- Phase 1 model-pool runtime
+- request-scoped model leasing
+- pool-aware readiness in `/health`
+- overload rejection when all model instances are busy
+- basic pool-focused test coverage
+
+This means the original readiness and overload work that was previously described as a separate Phase 2 is now considered part of the completed Phase 1 implementation.
+
+The next implementation step in this document is therefore request timeouts and cancellation handling.
+
+## Phase 1: Replace The Shared Model With A Bounded Model Pool (Completed)
 
 ### Objective
 
@@ -266,51 +280,142 @@ Required tests:
 - leases are always returned or retired correctly after success, timeout, disconnect, or failure
 - readiness reflects real usable pool capacity
 
-## Phase 2: Add Readiness And Overload Semantics
+### Completed Notes
 
-### Objective
+The current implementation already includes these previously planned readiness and overload items:
 
-Make it safe to place the service behind a load balancer or container orchestrator.
+- pool-aware readiness state in `/health`
+- explicit overload handling when all model instances are busy
+- pool status exposure for operational visibility
+- startup loading of the configured model pool
 
-### Changes
+Remaining readiness refinements can be handled later with deployment and observability work rather than as a separate next phase.
 
-- Split health behavior into two meanings:
-  - liveness: process is up
-  - readiness: the full configured model pool is loaded and able to accept work
-- Keep `/health` if desired, but ensure it clearly exposes readiness state.
-- Optionally add a dedicated readiness endpoint if the deployment platform expects one.
-- Return explicit overload errors when all model instances are busy.
-- Document expected status codes for:
-  - model not ready
-  - overload
-  - invalid request
-  - internal failure
-
-### Implementation Notes
-
-- Replace or extend the existing model initialization state in `app/core/tts_model.py` to account for pool initialization.
-- Avoid sending traffic to instances where initialization is still in progress.
-- Prefer clear machine-readable error payloads that match the current error response shape.
-
-### Acceptance Criteria
-
-- an instance is only considered ready when the configured model pool is actually usable
-- overloads can be distinguished from ordinary internal errors
-- deployment docs can point traffic only to ready instances
-
-## Phase 3: Add Request Timeouts And Cancellation Handling
+## Phase 2: Add Request Timeouts And Cancellation Handling
 
 ### Objective
 
 Prevent requests from running forever and reduce resource leaks when clients disappear while models are leased.
 
+### Phase 2 Decisions
+
+Use these decisions as the default implementation unless real deployment constraints require a different contract:
+
+- Apply one total request timeout per accepted request.
+- Start the timeout clock after request validation succeeds and before model lease acquisition begins.
+- Count lease wait time toward the total timeout budget.
+- Treat the timeout budget as user-facing end-to-end processing time, so waiting for an available model instance is part of the same request deadline.
+- Keep one timeout value for both streaming and non-streaming in the first version.
+- Treat timeout as a request-level failure, not as a broken-model event by default.
+- Do not retire a model instance only because a request timed out.
+- For SSE, stop scheduling new chunk generation as soon as the client disconnects or timeout is reached.
+- Use `504` for non-streaming request timeouts.
+- Keep `503` for model-pool not-ready and no-capacity conditions.
+- Allow SSE timeout or disconnect to terminate the stream without a final `speech.audio.done` event.
+- If one in-flight `generate(...)` call cannot be interrupted immediately, allow that single in-flight call to finish, but do not schedule additional chunks for that request.
+- Always release the leased model in a `finally` block even when timeout, disconnect, or write failure occurs.
+- Prefer explicit timeout and disconnect logging over trying to surface perfect cancellation semantics to the client.
+
 ### Changes
 
-- Add a configurable total request timeout, such as `REQUEST_TIMEOUT_SECONDS`.
-- Wrap generation in timeout handling for both streaming and non-streaming paths.
+- Add a configurable total request timeout:
+  - `REQUEST_TIMEOUT_SECONDS`
+- Wrap the full accepted request lifecycle in timeout handling for both streaming and non-streaming paths.
 - Detect client disconnects during SSE streaming and stop generating remaining chunks.
 - Ensure partial buffers and tensors are released on timeout or disconnect.
 - Ensure leased model instances are always returned to the pool.
+- Add explicit timeout error responses for non-streaming requests.
+- Add explicit generator termination rules for SSE requests.
+
+### Concrete Runtime Shape
+
+The smallest workable shape is:
+
+- one timeout helper that wraps the full request generation lifecycle
+- one disconnect check inside the SSE generation loop
+- one shared cleanup path for:
+  - timeout
+  - disconnect
+  - streaming write failure
+  - ordinary generation exception
+
+The helper API can remain small, for example:
+
+- `run_with_request_timeout(...)`
+- `request_has_disconnected(request)` or equivalent inline check
+- `handle_timeout_error(...)`
+
+Keep the first version simple. Do not build a cancellation manager or task registry yet.
+
+### Timeout Scope Rules
+
+Define timeout boundaries explicitly:
+
+- request validation happens before timeout handling
+- timeout starts before attempting to lease a model instance
+- queue wait time counts toward the timeout budget
+- all chunk generation counts toward the timeout budget
+- non-streaming response assembly counts toward the timeout budget
+- SSE event generation counts toward the timeout budget
+
+This gives one simple mental model:
+
+- once a request is accepted into runtime processing, it has one total time budget
+
+### Timeout Response Rules
+
+Define timeout outcomes explicitly:
+
+- non-streaming requests should return a timeout error response
+- use `504` if the service exceeded its own processing deadline
+- SSE requests cannot reliably send a final structured error event after a broken client connection, so the first version should simply terminate the stream
+- if timeout occurs while the SSE connection is still open, end the stream without a final `speech.audio.done` event in the minimal version
+
+For the first version, the chosen contract is:
+
+- non-streaming timeout: return `504`
+- SSE timeout while still connected: stop the stream and log timeout
+- SSE disconnect: stop the stream silently and log disconnect
+
+### Request Leasing And Timeout Interaction
+
+Phase 2 must preserve the Phase 1 pool guarantees:
+
+- a timed-out request must not leak its lease
+- a disconnected SSE request must not keep the lease longer than necessary
+- a timeout alone must not mark the model instance as broken
+- a genuine generation exception may still mark the model instance broken under Phase 1 rules
+
+Use this decision table:
+
+- ordinary success: release lease normally
+- timeout before lease acquired: no lease to release
+- timeout after lease acquired: release lease
+- disconnect during SSE after lease acquired: release lease after the current in-flight step completes or is aborted
+- generation exception: follow existing broken-instance policy
+
+### SSE Disconnect Rules
+
+Define disconnect handling explicitly:
+
+- check for disconnect before scheduling each new chunk
+- optionally check again before yielding each SSE event
+- if disconnected, stop producing more audio immediately
+- do not emit `speech.audio.done` after disconnect
+- do not attempt retries or reconnection handling in the API process
+
+The key goal is not perfect mid-kernel interruption. The key goal is to avoid doing avoidable extra work after the client is gone.
+
+### In-Flight Inference Cancellation Rules
+
+Be explicit about the limitation here:
+
+- the lower-level `model.generate(...)` call may not be interruptible once started
+- Phase 2 should not depend on hard cancellation inside the model runtime
+- instead, Phase 2 should stop further chunk scheduling after timeout or disconnect is observed
+- if a single chunk finishes after timeout or disconnect, discard its output and release resources
+
+This is good enough for the minimal production-safe version and avoids pretending the underlying model runtime supports stronger cancellation than it does.
 
 ### Implementation Notes
 
@@ -320,14 +425,57 @@ Prevent requests from running forever and reduce resource leaks when clients dis
   - do not retry automatically
 - If some lower-level inference work cannot be interrupted immediately, document that limitation and still stop any further chunk scheduling.
 - Use `try/finally` semantics around model leasing so pool capacity is not lost after failures.
+- Keep timeout and disconnect handling centralized enough that SSE and non-streaming do not drift into different lease cleanup behavior.
+- Prefer one documented behavior over a more complex but inconsistent client contract.
+
+### Proposed Config Additions For Phase 2
+
+Suggested new environment variables:
+
+- `REQUEST_TIMEOUT_SECONDS=120`
+
+Keep the first version to one timeout knob unless there is a real need for separate SSE and non-streaming values.
+
+### Minimum Logging Requirements For Phase 2
+
+Before the broader observability phase, Phase 2 should at minimum log:
+
+- request ID
+- leased model instance ID if acquired
+- timeout vs disconnect vs generation failure outcome
+- elapsed time when the request was terminated
+- whether the timeout happened while waiting for lease, generating audio, or writing the response
+
+Do not log full request text.
+
+### Minimum Test Coverage For Phase 2
+
+Before moving to later phases, prove that timeout and cancellation logic behaves predictably.
+
+Required tests:
+
+- non-streaming request times out and returns the chosen timeout status code
+- timed-out non-streaming request returns its lease to the pool
+- SSE request stops scheduling new chunks after timeout
+- SSE disconnect stops scheduling new chunks
+- timeout during lease wait behaves according to the documented timeout contract
+- generation exceptions still follow the existing broken-instance policy and are not confused with timeout behavior
+- a timeout does not retire an otherwise healthy model instance
+
+### Open Decisions To Confirm Before Implementation
+
+Phase 2 is specific enough to build with the chosen defaults above. Separate timeout values for streaming and non-streaming can be revisited later only if real traffic shows a clear need.
 
 ### Acceptance Criteria
 
 - long-running requests terminate within a predictable time bound
 - SSE clients that disconnect do not continue consuming the full remaining request budget
 - failures leave the process and the model pool in a recoverable state for later requests
+- timeout behavior is consistent and documented for both non-streaming and SSE paths
+- leases are always released after timeout or disconnect
+- timeout does not falsely retire healthy model instances
 
-## Phase 4: Reduce Memory Risk
+## Phase 3: Reduce Memory Risk
 
 ### Objective
 
@@ -353,7 +501,7 @@ Keep one request from making concurrent traffic unstable.
 - pooled concurrent medium-to-large requests do not trigger obvious memory blowups under tested limits
 - operators have a documented safe input-size and concurrency envelope
 
-## Phase 5: Add Basic Observability
+## Phase 4: Add Basic Observability
 
 ### Objective
 
@@ -387,7 +535,7 @@ Make overload, latency, and failure modes visible.
 - operators can tell whether the service is slow, overloaded, timing out, or failing
 - logs are usable without exposing request text
 
-## Phase 6: Deployment Guardrails
+## Phase 5: Deployment Guardrails
 
 ### Objective
 
@@ -419,7 +567,7 @@ Prevent unsafe production deployment defaults.
 - deployment docs reduce the chance of accidental pool multiplication and runaway memory usage
 - production defaults favor safety over peak throughput
 
-## Phase 7: Validation And Load Testing
+## Phase 6: Validation And Load Testing
 
 ### Objective
 
@@ -458,12 +606,12 @@ Verify the chosen safety limits with real behavior instead of assumptions.
 
 Implement the work in this order:
 
-1. Replace the shared model with a bounded model pool and overload response.
-2. Expose clear readiness state and deployment guidance.
-3. Add request timeout handling.
-4. Add structured request logging.
-5. Add overload and timeout tests.
-6. Run small-scale concurrency validation and tune pool size.
+1. Add request timeout handling.
+2. Stop or curtail work on SSE client disconnects.
+3. Add structured request logging.
+4. Add overload and timeout tests.
+5. Run small-scale concurrency validation and tune pool size.
+6. Document deployment constraints and recommended production settings.
 
 ## Explicit Non-Goals For The Minimal Version
 
@@ -492,11 +640,11 @@ Keep them validated in `app/config.py` and expose the non-sensitive values in `/
 
 ## Checklist
 
-- [ ] Replace the single shared model with a bounded pool of model instances
-- [ ] Add configurable model-pool size and queue-wait settings
-- [ ] Return explicit overload errors when all model instances are busy
-- [ ] Make readiness clearly distinguishable from liveness
-- [ ] Ensure deployment only routes traffic to ready instances
+- [x] Replace the single shared model with a bounded pool of model instances
+- [x] Add configurable model-pool size and queue-wait settings
+- [x] Return explicit overload errors when all model instances are busy
+- [x] Make readiness clearly distinguishable from liveness at the application level
+- [x] Expose pool status through `/health`
 - [ ] Add a configurable total request timeout
 - [ ] Stop or curtail work on SSE client disconnects
 - [ ] Ensure failures and timeouts release request-scoped resources and return leased models to the pool
