@@ -28,7 +28,7 @@ class Config:
     MAX_CHUNK_LENGTH = int(os.getenv("MAX_CHUNK_LENGTH", 280))
     MAX_TOTAL_LENGTH = int(os.getenv("MAX_TOTAL_LENGTH", 3000))
     MODEL_INSTANCE_COUNT = int(os.getenv("MODEL_INSTANCE_COUNT", 2))
-    MAX_QUEUE_WAIT_SECONDS = float(os.getenv("MAX_QUEUE_WAIT_SECONDS", 10))
+    MAX_QUEUE_WAIT_SECONDS = float(os.getenv("MAX_QUEUE_WAIT_SECONDS", 60))
     REQUEST_TIMEOUT_SECONDS = float(os.getenv("REQUEST_TIMEOUT_SECONDS", 120))
 
     # Voice and model settings
