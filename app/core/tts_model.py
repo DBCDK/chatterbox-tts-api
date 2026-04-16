@@ -3,8 +3,8 @@ TTS model initialization and pooled model management.
 """
 
 import asyncio
+import logging
 import os
-import traceback
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import Enum
@@ -16,6 +16,9 @@ from huggingface_hub import snapshot_download
 
 from app.config import Config, detect_device
 from app.core.mtl import SUPPORTED_LANGUAGES
+from app.core.observability import get_logger, log_event
+
+logger = get_logger(__name__)
 
 # Backwards-compatible primary model reference.
 _model = None
@@ -213,6 +216,16 @@ def _update_runtime_after_slot_failure(instance_id: int, reason: str):
     else:
         _initialization_progress = f"Degraded pool capacity: {healthy_count}/{len(_model_pool)} instances healthy"
 
+    log_event(
+        logger,
+        logging.ERROR,
+        "model_instance_retired",
+        model_instance_id=instance_id,
+        healthy_instances=healthy_count,
+        configured_pool_size=len(_model_pool),
+        reason=reason,
+    )
+
 
 async def initialize_model():
     """Initialize the configured pool of Chatterbox TTS models."""
@@ -231,17 +244,19 @@ async def initialize_model():
         model_class = Config.get_model_class()
         default_language = Config.get_default_language()
 
-        print("Initializing Chatterbox TTS model pool...")
-        print(f"Device: {_device}")
-        print(f"Voice sample: {Config.VOICE_SAMPLE_PATH}")
-        print(f"Model cache: {Config.MODEL_CACHE_DIR}")
-        print(f"Model source: {model_source}")
-        print(f"Model class: {model_class}")
-        print(f"Model instances: {Config.MODEL_INSTANCE_COUNT}")
-        if Config.MODEL_REPO_ID:
-            print(f"Model repo: {Config.MODEL_REPO_ID}")
-        if Config.MODEL_LOCAL_PATH:
-            print(f"Model local path: {Config.MODEL_LOCAL_PATH}")
+        log_event(
+            logger,
+            logging.INFO,
+            "model_pool_initialization_started",
+            device=_device,
+            voice_sample_path=Config.VOICE_SAMPLE_PATH,
+            model_cache_dir=Config.MODEL_CACHE_DIR,
+            model_source=model_source,
+            model_class=model_class,
+            configured_pool_size=Config.MODEL_INSTANCE_COUNT,
+            model_repo_id=Config.MODEL_REPO_ID or None,
+            model_local_path=Config.MODEL_LOCAL_PATH,
+        )
 
         _initialization_progress = "Creating model cache directory..."
         os.makedirs(Config.MODEL_CACHE_DIR, exist_ok=True)
@@ -269,6 +284,16 @@ async def initialize_model():
             _initialization_progress = (
                 f"Loading TTS model {instance_id + 1}/{Config.MODEL_INSTANCE_COUNT}..."
             )
+            log_event(
+                logger,
+                logging.INFO,
+                "model_instance_loading",
+                model_instance_id=instance_id,
+                device=_device,
+                model_source=model_source,
+                model_class=model_class,
+                configured_pool_size=Config.MODEL_INSTANCE_COUNT,
+            )
             model, model_metadata = await loop.run_in_executor(
                 None,
                 lambda ms=model_source, mc=model_class, dv=_device: _load_model_sync(
@@ -279,6 +304,13 @@ async def initialize_model():
                 ModelSlot(instance_id=instance_id, model=model, device=_device)
             )
             available_ids.put_nowait(instance_id)
+            log_event(
+                logger,
+                logging.INFO,
+                "model_instance_loaded",
+                model_instance_id=instance_id,
+                device=_device,
+            )
 
         _model_pool = loaded_slots
         _available_model_ids = available_ids
@@ -290,17 +322,20 @@ async def initialize_model():
             "default_language": default_language,
         }
 
-        print(f"Supported languages: {', '.join(_supported_languages.keys())}")
-        if _model_metadata.get("resolved_model_path"):
-            print(f"Resolved model path: {_model_metadata['resolved_model_path']}")
-
         _initialization_state = InitializationState.READY.value
         _initialization_progress = (
             f"Model pool ready ({len(_model_pool)}/{Config.MODEL_INSTANCE_COUNT})"
         )
         _initialization_error = None
-        print(
-            f"Model pool initialized successfully on {_device} with {len(_model_pool)} instances"
+        log_event(
+            logger,
+            logging.INFO,
+            "model_pool_initialized",
+            device=_device,
+            configured_pool_size=Config.MODEL_INSTANCE_COUNT,
+            loaded_instances=len(_model_pool),
+            supported_languages=list(_supported_languages.keys()),
+            resolved_model_path=_model_metadata.get("resolved_model_path"),
         )
         return _model
 
@@ -311,8 +346,14 @@ async def initialize_model():
         _model = None
         _model_pool = []
         _available_model_ids = None
-        print(f"Failed to initialize model pool: {e}")
-        traceback.print_exc()
+        logger.exception(
+            "model_pool_initialization_failed",
+            extra={
+                "event": "model_pool_initialization_failed",
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+            },
+        )
         raise e
 
 

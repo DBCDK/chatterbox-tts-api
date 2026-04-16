@@ -4,6 +4,7 @@ Main FastAPI application
 
 from contextlib import asynccontextmanager
 import asyncio
+import logging
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +13,7 @@ from fastapi.responses import JSONResponse
 from app.core.tts_model import initialize_model
 from app.api.router import api_router
 from app.config import Config
+from app.core.observability import configure_logging, get_logger, log_event
 from app.core.version import get_version
 
 
@@ -24,13 +26,33 @@ ascii_art = r"""
                                                     
 """
 
+SERVICE_NAME = "chatterbox-tts-api"
+APP_VERSION = get_version()
+
+configure_logging(service=SERVICE_NAME, version=APP_VERSION)
+logger = get_logger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(ascii_art)
+    log_event(
+        logger,
+        level=logging.INFO,
+        event="app_starting",
+        service=SERVICE_NAME,
+        configured_pool_size=Config.MODEL_INSTANCE_COUNT,
+    )
     model_init_task = asyncio.create_task(initialize_model())
 
     yield
+
+    log_event(
+        logger,
+        level=logging.INFO,
+        event="app_shutting_down",
+        service=SERVICE_NAME,
+    )
 
     if not model_init_task.done():
         model_init_task.cancel()
@@ -43,7 +65,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Chatterbox TTS API",
     description="REST API for Chatterbox TTS with OpenAI-compatible endpoints",
-    version=get_version(),
+    version=APP_VERSION,
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
@@ -73,6 +95,14 @@ async def http_exception_handler(request, exc):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc):
+    log_event(
+        logger,
+        level=logging.ERROR,
+        event="unhandled_exception",
+        route=str(request.url.path),
+        method=request.method,
+        error_type=type(exc).__name__,
+    )
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
