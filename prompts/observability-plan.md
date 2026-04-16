@@ -41,8 +41,12 @@ Completed in the current branch:
 - structured model-pool initialization and retirement logs
 - structured request logs for start, lease acquisition, success, timeout, overload, disconnect, and failure
 - focused unit coverage for structured log payloads and field safety
+- Prometheus metrics module under `app/core/metrics.py`
+- `GET /metrics` endpoint with Prometheus text exposition output
+- request counters, latency histograms, usage histograms, pool gauges, and pool event counters
+- focused unit coverage for metrics rendering and key request outcomes
 
-The next observability step is Prometheus metrics on `GET /metrics`.
+The next observability step is live scrape verification and any metric tuning based on real traffic.
 
 ## Desired End State
 
@@ -158,7 +162,7 @@ The current implementation includes these Phase 1 behaviors:
 - request ID, route, mode, elapsed time, and outcome fields on request-scoped logs
 - unit coverage for formatter output and request-log field presence
 
-## Phase 2: Prometheus Metrics Endpoint
+## Phase 2: Prometheus Metrics Endpoint (Completed)
 
 ### Objective
 
@@ -252,6 +256,21 @@ Avoid labels with unbounded values such as:
 - labels remain bounded and operationally safe
 - metrics can distinguish success, timeout, overload, and disconnect behavior
 
+### Completed Notes
+
+The current implementation includes these Phase 2 behaviors:
+
+- Prometheus client dependency in `pyproject.toml`
+- shared metrics module in `app/core/metrics.py`
+- `GET /metrics` endpoint in `app/api/endpoints/metrics.py`
+- mounted metrics route in `app/api/router.py`
+- request counters by route, mode, and outcome
+- latency histograms for total request time, lease wait time, and generation time
+- usage histograms for input chars, audio seconds, and chunk count
+- pool gauges for configured, healthy, available, busy, and unhealthy instances
+- pool event counters for lease acquisition failures and model instance retirements
+- unit coverage for metrics rendering, success, overload, and SSE disconnect updates
+
 ## Phase 3: Integration Points
 
 ### Objective
@@ -325,11 +344,11 @@ If not otherwise specified, the default recommendation is:
 - [x] Emit structured startup and model-pool lifecycle logs
 - [x] Emit structured request outcome logs for success, timeout, overload, disconnect, and failure
 - [x] Avoid logging full request text
-- [ ] Add Prometheus client dependency if needed
-- [ ] Add a `/metrics` endpoint
-- [ ] Add request counters for success, timeout, overload, failure, and disconnect
-- [ ] Add latency histograms for total request time and lease wait time
-- [ ] Add gauges for current model-pool state
-- [ ] Add tests for `/metrics` output and key metric updates
-- [ ] Add focused tests for structured log field presence where practical
+- [x] Add Prometheus client dependency if needed
+- [x] Add a `/metrics` endpoint
+- [x] Add request counters for success, timeout, overload, failure, and disconnect
+- [x] Add latency histograms for total request time and lease wait time
+- [x] Add gauges for current model-pool state
+- [x] Add tests for `/metrics` output and key metric updates
+- [x] Add focused tests for structured log field presence where practical
 - [ ] Run manual verification against a live server

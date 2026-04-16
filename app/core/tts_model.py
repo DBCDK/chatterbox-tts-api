@@ -15,6 +15,10 @@ from chatterbox.tts import ChatterboxTTS
 from huggingface_hub import snapshot_download
 
 from app.config import Config, detect_device
+from app.core.metrics import (
+    observe_model_instance_retired,
+    observe_pool_status,
+)
 from app.core.mtl import SUPPORTED_LANGUAGES
 from app.core.observability import get_logger, log_event
 
@@ -108,6 +112,15 @@ def _reset_runtime_state():
     }
     _model_pool = []
     _available_model_ids = None
+    observe_pool_status(
+        {
+            "configured_instances": Config.MODEL_INSTANCE_COUNT,
+            "healthy_instances": 0,
+            "available_instances": 0,
+            "busy_instances": 0,
+            "unhealthy_instances": 0,
+        }
+    )
 
 
 def _get_model_loader(model_class: str):
@@ -216,6 +229,9 @@ def _update_runtime_after_slot_failure(instance_id: int, reason: str):
     else:
         _initialization_progress = f"Degraded pool capacity: {healthy_count}/{len(_model_pool)} instances healthy"
 
+    observe_model_instance_retired()
+    observe_pool_status(get_pool_status())
+
     log_event(
         logger,
         logging.ERROR,
@@ -274,6 +290,15 @@ async def initialize_model():
 
         _initialization_progress = "Configuring device compatibility..."
         _configure_cpu_loading(_device)
+        observe_pool_status(
+            {
+                "configured_instances": Config.MODEL_INSTANCE_COUNT,
+                "healthy_instances": 0,
+                "available_instances": 0,
+                "busy_instances": 0,
+                "unhealthy_instances": 0,
+            }
+        )
 
         loop = asyncio.get_running_loop()
         loaded_slots: list[ModelSlot] = []
@@ -337,6 +362,7 @@ async def initialize_model():
             supported_languages=list(_supported_languages.keys()),
             resolved_model_path=_model_metadata.get("resolved_model_path"),
         )
+        observe_pool_status(get_pool_status())
         return _model
 
     except Exception as e:
@@ -346,6 +372,15 @@ async def initialize_model():
         _model = None
         _model_pool = []
         _available_model_ids = None
+        observe_pool_status(
+            {
+                "configured_instances": Config.MODEL_INSTANCE_COUNT,
+                "healthy_instances": 0,
+                "available_instances": 0,
+                "busy_instances": 0,
+                "unhealthy_instances": 0,
+            }
+        )
         logger.exception(
             "model_pool_initialization_failed",
             extra={
@@ -387,11 +422,13 @@ async def acquire_model_lease(timeout_seconds: Optional[float] = None) -> ModelL
         if not slot.healthy:
             continue
 
-        return ModelLease(
+        lease = ModelLease(
             instance_id=slot.instance_id,
             model=slot.model,
             device=slot.device,
         )
+        observe_pool_status(get_pool_status())
+        return lease
 
 
 async def release_model_lease(lease: Optional[ModelLease]):
@@ -414,6 +451,7 @@ async def release_model_lease(lease: Optional[ModelLease]):
 
     if slot.healthy and _available_model_ids is not None:
         _available_model_ids.put_nowait(lease.instance_id)
+    observe_pool_status(get_pool_status())
 
 
 @asynccontextmanager
