@@ -100,6 +100,9 @@ def test_metrics_endpoint_returns_prometheus_payload():
     assert response.status_code == 200
     assert "text/plain" in response.headers["content-type"]
     assert "chatterbox_tts_requests_total" in response.text
+    assert "python_gc_objects_collected_total" in response.text
+    assert "python_info" in response.text
+    assert "chatterbox_tts_cpu_memory_mb" in response.text
 
 
 def test_successful_audio_request_updates_metrics(monkeypatch):
@@ -140,6 +143,11 @@ def test_successful_audio_request_updates_metrics(monkeypatch):
         in metrics_text
     )
     assert (
+        'chatterbox_tts_requests_in_progress{mode="audio",route="/v1/audio/speech"} 0.0'
+        in metrics_text
+    )
+    assert "chatterbox_tts_requests_waiting_for_lease 0.0" in metrics_text
+    assert (
         'chatterbox_tts_request_duration_seconds_bucket{le="0.005",mode="audio",outcome="success",route="/v1/audio/speech"}'
         not in metrics_text
     )
@@ -159,6 +167,11 @@ def test_successful_audio_request_updates_metrics(monkeypatch):
         'chatterbox_tts_generation_duration_seconds_bucket{le="0.005",mode="audio",outcome="success",route="/v1/audio/speech"}'
         not in metrics_text
     )
+    assert "chatterbox_tts_model_initialization_seconds_bucket{" in metrics_text
+    assert "chatterbox_tts_model_instance_load_seconds_bucket{" in metrics_text
+    assert "chatterbox_tts_cpu_memory_mb " in metrics_text
+    assert "chatterbox_tts_cpu_memory_percent " in metrics_text
+    assert "chatterbox_tts_gpu_memory_allocated_mb 0.0" in metrics_text
     assert (
         'chatterbox_tts_audio_seconds_bucket{le="0.005",mode="audio",route="/v1/audio/speech"}'
         not in metrics_text
@@ -193,6 +206,14 @@ def test_overload_updates_request_and_lease_failure_metrics(monkeypatch):
         metrics_text,
         "chatterbox_tts_lease_acquire_failures_total",
         'reason="no_capacity"',
+        "1.0",
+    )
+    assert _has_metric_line(
+        metrics_text,
+        "chatterbox_tts_request_failures_total",
+        'mode="audio"',
+        'reason="no_capacity"',
+        'stage="lease_wait"',
         "1.0",
     )
 
@@ -239,6 +260,18 @@ def test_sse_disconnect_updates_disconnect_metrics(monkeypatch):
         "chatterbox_tts_sse_disconnects_total",
         'route="/v1/audio/speech"',
         "1.0",
+    )
+    assert _has_metric_line(
+        metrics_text,
+        "chatterbox_tts_request_failures_total",
+        'mode="sse"',
+        'reason="client_disconnect"',
+        'stage="chunk_generation"',
+        "1.0",
+    )
+    assert (
+        'chatterbox_tts_time_to_first_chunk_seconds_bucket{le="0.1",route="/v1/audio/speech"}'
+        in metrics_text
     )
     assert (
         'chatterbox_tts_chunk_count_bucket{le="1.0",mode="sse",route="/v1/audio/speech"}'

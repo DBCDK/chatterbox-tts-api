@@ -16,6 +16,8 @@ from huggingface_hub import snapshot_download
 
 from app.config import Config, detect_device
 from app.core.metrics import (
+    observe_model_initialization,
+    observe_model_instance_load,
     observe_model_instance_retired,
     observe_pool_status,
 )
@@ -249,6 +251,7 @@ async def initialize_model():
     global _initialization_progress, _is_multilingual, _supported_languages
     global _model_metadata, _model_pool, _available_model_ids
 
+    overall_started_at = asyncio.get_running_loop().time()
     try:
         _reset_runtime_state()
         _initialization_state = InitializationState.INITIALIZING.value
@@ -319,12 +322,18 @@ async def initialize_model():
                 model_class=model_class,
                 configured_pool_size=Config.MODEL_INSTANCE_COUNT,
             )
-            model, model_metadata = await loop.run_in_executor(
-                None,
-                lambda ms=model_source, mc=model_class, dv=_device: _load_model_sync(
-                    ms, mc, dv
-                ),
-            )
+            instance_started_at = loop.time()
+            try:
+                model, model_metadata = await loop.run_in_executor(
+                    None,
+                    lambda ms=model_source, mc=model_class, dv=_device: (
+                        _load_model_sync(ms, mc, dv)
+                    ),
+                )
+            except Exception:
+                observe_model_instance_load("error", loop.time() - instance_started_at)
+                raise
+            observe_model_instance_load("success", loop.time() - instance_started_at)
             loaded_slots.append(
                 ModelSlot(instance_id=instance_id, model=model, device=_device)
             )
@@ -363,6 +372,9 @@ async def initialize_model():
             resolved_model_path=_model_metadata.get("resolved_model_path"),
         )
         observe_pool_status(get_pool_status())
+        observe_model_initialization(
+            "success", asyncio.get_running_loop().time() - overall_started_at
+        )
         return _model
 
     except Exception as e:
@@ -388,6 +400,9 @@ async def initialize_model():
                 "error_type": type(e).__name__,
                 "error_message": str(e),
             },
+        )
+        observe_model_initialization(
+            "error", asyncio.get_running_loop().time() - overall_started_at
         )
         raise e
 
