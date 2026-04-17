@@ -127,6 +127,42 @@ def test_successful_audio_request_updates_metrics(monkeypatch):
     )
     assert "chatterbox_tts_pool_available_instances 1.0" in metrics_text
     assert "chatterbox_tts_audio_seconds_bucket{" in metrics_text
+    assert (
+        'chatterbox_tts_input_chars_bucket{le="1.0",mode="audio",route="/v1/audio/speech"} 0.0'
+        in metrics_text
+    )
+    assert (
+        'chatterbox_tts_audio_seconds_bucket{le="1.0",mode="audio",route="/v1/audio/speech"}'
+        in metrics_text
+    )
+    assert (
+        'chatterbox_tts_request_duration_seconds_bucket{le="15.0",mode="audio",outcome="success",route="/v1/audio/speech"}'
+        in metrics_text
+    )
+    assert (
+        'chatterbox_tts_request_duration_seconds_bucket{le="0.005",mode="audio",outcome="success",route="/v1/audio/speech"}'
+        not in metrics_text
+    )
+    assert (
+        'chatterbox_tts_lease_wait_seconds_bucket{le="15.0",mode="audio",route="/v1/audio/speech"}'
+        in metrics_text
+    )
+    assert (
+        'chatterbox_tts_lease_wait_seconds_bucket{le="0.005",mode="audio",route="/v1/audio/speech"}'
+        not in metrics_text
+    )
+    assert (
+        'chatterbox_tts_generation_duration_seconds_bucket{le="15.0",mode="audio",outcome="success",route="/v1/audio/speech"}'
+        in metrics_text
+    )
+    assert (
+        'chatterbox_tts_generation_duration_seconds_bucket{le="0.005",mode="audio",outcome="success",route="/v1/audio/speech"}'
+        not in metrics_text
+    )
+    assert (
+        'chatterbox_tts_audio_seconds_bucket{le="0.005",mode="audio",route="/v1/audio/speech"}'
+        not in metrics_text
+    )
 
 
 def test_overload_updates_request_and_lease_failure_metrics(monkeypatch):
@@ -203,4 +239,12 @@ def test_sse_disconnect_updates_disconnect_metrics(monkeypatch):
         "chatterbox_tts_sse_disconnects_total",
         'route="/v1/audio/speech"',
         "1.0",
+    )
+    assert (
+        'chatterbox_tts_chunk_count_bucket{le="1.0",mode="sse",route="/v1/audio/speech"}'
+        in metrics_text
+    )
+    assert (
+        'chatterbox_tts_chunk_count_bucket{le="0.005",mode="sse",route="/v1/audio/speech"}'
+        not in metrics_text
     )

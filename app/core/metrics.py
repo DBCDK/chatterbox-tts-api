@@ -15,6 +15,29 @@ from prometheus_client import (
 )
 
 
+REQUEST_DURATION_SECONDS_BUCKETS = (
+    0.1,
+    0.25,
+    0.5,
+    1,
+    2.5,
+    5,
+    10,
+    15,
+    20,
+    30,
+    45,
+    60,
+    90,
+    120,
+)
+LEASE_WAIT_SECONDS_BUCKETS = (0.01, 0.1, 0.5, 1, 2.5, 5, 10, 15, 20, 30, 45, 60)
+GENERATION_DURATION_SECONDS_BUCKETS = (0.5, 1, 2.5, 5, 10, 15, 20, 30, 45, 60, 90, 120)
+INPUT_CHARS_BUCKETS = (1, 10, 50, 100, 250, 500, 1000, 2500, 5000, 10000)
+AUDIO_SECONDS_BUCKETS = (1, 5, 10, 30, 60, 120, 300, 600)
+CHUNK_COUNT_BUCKETS = (1, 2, 5, 10, 20, 50, 100)
+
+
 @dataclass
 class MetricsState:
     registry: CollectorRegistry
@@ -66,36 +89,42 @@ def _build_metrics_state() -> MetricsState:
             "chatterbox_tts_request_duration_seconds",
             "Total request duration in seconds",
             ["route", "mode", "outcome"],
+            buckets=REQUEST_DURATION_SECONDS_BUCKETS,
             registry=registry,
         ),
         lease_wait_seconds=Histogram(
             "chatterbox_tts_lease_wait_seconds",
             "Time spent waiting for a model lease",
             ["route", "mode"],
+            buckets=LEASE_WAIT_SECONDS_BUCKETS,
             registry=registry,
         ),
         generation_duration_seconds=Histogram(
             "chatterbox_tts_generation_duration_seconds",
             "Time spent generating audio after lease acquisition",
             ["route", "mode", "outcome"],
+            buckets=GENERATION_DURATION_SECONDS_BUCKETS,
             registry=registry,
         ),
         input_chars=Histogram(
             "chatterbox_tts_input_chars",
             "Input text length in characters",
             ["route", "mode"],
+            buckets=INPUT_CHARS_BUCKETS,
             registry=registry,
         ),
         audio_seconds=Histogram(
             "chatterbox_tts_audio_seconds",
             "Generated audio length in seconds",
             ["route", "mode"],
+            buckets=AUDIO_SECONDS_BUCKETS,
             registry=registry,
         ),
         chunk_count=Histogram(
             "chatterbox_tts_chunk_count",
             "Chunk count per request",
             ["route", "mode"],
+            buckets=CHUNK_COUNT_BUCKETS,
             registry=registry,
         ),
         pool_configured=Gauge(
