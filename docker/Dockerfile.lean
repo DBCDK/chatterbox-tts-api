@@ -44,7 +44,7 @@ USER appuser
 
 RUN python3 -m venv "$VIRTUAL_ENV" && \
     pip install --no-cache-dir --upgrade pip setuptools==79.0.1 wheel && \
-    pip install --no-cache-dir fastapi uvicorn[standard] python-dotenv python-multipart requests psutil pydub sse-starlette && \
+    pip install --no-cache-dir fastapi uvicorn[standard] python-dotenv python-multipart requests psutil pydub sse-starlette prometheus-client && \
     pip install git+https://github.com/travisvn/chatterbox-multilingual.git@exp
 
 COPY --chown=appuser:appuser app/ ./app/
