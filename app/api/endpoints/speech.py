@@ -202,6 +202,13 @@ async def _acquire_request_lease(context: RequestRuntimeContext) -> ModelLease:
                 and context.remaining_seconds() <= 0
                 and lease_wait_timeout <= Config.REQUEST_TIMEOUT_SECONDS
             ):
+                _log_request_event(
+                    logging.WARNING,
+                    "request_timeout",
+                    context,
+                    outcome="timeout",
+                    timeout_stage="lease_wait",
+                )
                 raise RequestTimeoutExceeded("lease_wait") from exc
             observe_lease_acquire_failure("no_capacity")
             observe_request_failure("no_capacity", "lease_wait", context.mode)
