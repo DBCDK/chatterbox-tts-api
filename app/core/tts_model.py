@@ -15,6 +15,7 @@ from chatterbox.tts import ChatterboxTTS
 from huggingface_hub import snapshot_download
 
 from app.config import Config, detect_device
+from app.core.chatterbox_patches import apply_chatterbox_patches
 from app.core.metrics import (
     observe_model_initialization,
     observe_model_instance_load,
@@ -145,6 +146,7 @@ def _resolve_supported_languages(model_source: str, model_class: str) -> Dict[st
 def _load_model_sync(
     model_source: str, model_class: str, device: str
 ) -> tuple[Any, Dict[str, Any]]:
+    apply_chatterbox_patches()
     loader = _get_model_loader(model_class)
     metadata: Dict[str, Any] = {
         "model_source": model_source,
