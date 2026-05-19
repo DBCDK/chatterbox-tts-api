@@ -71,4 +71,25 @@ def apply_chatterbox_patches() -> None:
         return original_loader(self, model_dir)
 
     converter_cls._load_cangjie_mapping = _load_cangjie_mapping
+
+    # Upstream bug: A[self.completed_at:, :-5].max(dim=1) raises IndexError when
+    # the alignment matrix has ≤5 text-token columns (e.g. single-character inputs).
+    # The same S > 5 guard that already exists on line 166 should also apply here.
+    from chatterbox.models.t3.inference.alignment_stream_analyzer import (
+        AlignmentStreamAnalyzer,
+    )
+
+    _original_step = AlignmentStreamAnalyzer.step
+
+    def _patched_step(self, logits, next_token=None):
+        try:
+            return _original_step(self, logits, next_token)
+        except IndexError as exc:
+            if "Expected reduction dim 1 to have non-zero size" in str(exc):
+                # Text too short for repetition check — skip EOS forcing and continue.
+                return logits
+            raise
+
+    AlignmentStreamAnalyzer.step = _patched_step
+
     _PATCHED = True
