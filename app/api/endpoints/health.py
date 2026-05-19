@@ -95,8 +95,11 @@ async def health_check():
 )
 async def liveness_probe(response: Response):
     if get_initialization_state() == InitializationState.ERROR.value:
-        response.status_code = 503
-        return {"status": "dead", "reason": "model pool permanently failed"}
+        from app.core import tts_model as _tts_model
+        recovering = any(s.reinitializing for s in _tts_model._model_pool)
+        if not recovering:
+            response.status_code = 503
+            return {"status": "dead", "reason": "model pool permanently failed"}
     return {"status": "alive"}
 
 

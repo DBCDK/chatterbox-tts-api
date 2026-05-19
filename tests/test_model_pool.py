@@ -370,3 +370,151 @@ def test_sse_request_keeps_one_stable_model(monkeypatch):
         assert tts_model.get_pool_status()["available_instances"] == 2
 
     asyncio.run(scenario())
+
+
+# ---------------------------------------------------------------------------
+# Slot recovery and scheduled refresh tests
+# ---------------------------------------------------------------------------
+
+async def _wait_until(condition, timeout: float = 2.0, interval: float = 0.05) -> bool:
+    """Poll until condition() is True or timeout expires."""
+    elapsed = 0.0
+    while elapsed < timeout:
+        if condition():
+            return True
+        await asyncio.sleep(interval)
+        elapsed += interval
+    return False
+
+
+def test_failed_slot_is_recovered(monkeypatch):
+    """After a fatal error retires a slot, the recovery task reloads it."""
+    load_calls = count()
+
+    def factory_for_load(name: str):
+        # First model loaded per slot is FatalFailingModel; reloads are RecordingModel.
+        call = next(load_calls)
+        if call < 1:
+            return FatalFailingModel(name)
+        return RecordingModel(name)
+
+    _configure_test_pool(monkeypatch, pool_size=1, model_factory=factory_for_load)
+    monkeypatch.setattr(tts_model, "SLOT_RECOVERY_INITIAL_BACKOFF_SECONDS", 0.0)
+
+    async def scenario():
+        await tts_model.initialize_model()
+
+        lease = await tts_model.acquire_model_lease(0)
+        with pytest.raises(RuntimeError, match="CUDA error"):
+            await speech._generate_chunk_audio(
+                lease=lease, chunk="hello",
+                voice_sample_path=Config.VOICE_SAMPLE_PATH,
+                language_id=None, exaggeration=None, cfg_weight=None, temperature=None,
+            )
+        await tts_model.release_model_lease(lease)
+
+        assert tts_model.get_pool_status()["healthy_instances"] == 0
+
+        recovered = await _wait_until(lambda: tts_model.is_ready())
+        assert recovered, "slot did not recover within timeout"
+
+        pool = tts_model.get_pool_status()
+        assert pool["healthy_instances"] == 1
+        assert pool["available_instances"] == 1
+        assert tts_model.get_initialization_state() == "ready"
+        assert tts_model._model_pool[0].requests_served == 0
+
+    asyncio.run(scenario())
+
+
+def test_slot_refreshes_after_request_threshold(monkeypatch):
+    """After SLOT_REFRESH_AFTER_REQUESTS completions the slot is reloaded."""
+    _configure_test_pool(monkeypatch, pool_size=1)
+    monkeypatch.setattr(tts_model, "SLOT_REFRESH_AFTER_REQUESTS", 3)
+
+    async def scenario():
+        await tts_model.initialize_model()
+        original_model = tts_model._model_pool[0].model
+
+        for _ in range(3):
+            lease = await tts_model.acquire_model_lease(0)
+            await speech._generate_chunk_audio(
+                lease=lease, chunk="hello",
+                voice_sample_path=Config.VOICE_SAMPLE_PATH,
+                language_id=None, exaggeration=None, cfg_weight=None, temperature=None,
+            )
+            await tts_model.release_model_lease(lease)
+
+        # After the 3rd release a refresh task should be running
+        refreshed = await _wait_until(lambda: tts_model.is_ready() and tts_model._model_pool[0].requests_served == 0)
+        assert refreshed, "slot did not complete scheduled refresh within timeout"
+
+        assert tts_model._model_pool[0].model is not original_model
+        assert tts_model.get_pool_status()["available_instances"] == 1
+
+    asyncio.run(scenario())
+
+
+def test_refresh_deferred_while_lock_held(monkeypatch):
+    """If the reinit lock is busy, the slot is returned to the pool instead of refreshed."""
+    _configure_test_pool(monkeypatch, pool_size=1)
+    monkeypatch.setattr(tts_model, "SLOT_REFRESH_AFTER_REQUESTS", 2)
+
+    async def scenario():
+        await tts_model.initialize_model()
+
+        # Hold the lock to simulate another reinit in progress
+        await tts_model._reinit_lock.acquire()
+        try:
+            for _ in range(2):
+                lease = await tts_model.acquire_model_lease(0)
+                await speech._generate_chunk_audio(
+                    lease=lease, chunk="hello",
+                    voice_sample_path=Config.VOICE_SAMPLE_PATH,
+                    language_id=None, exaggeration=None, cfg_weight=None, temperature=None,
+                )
+                await tts_model.release_model_lease(lease)
+
+            # Slot should be back in the pool (refresh deferred), not reinitializing
+            assert tts_model.get_pool_status()["available_instances"] == 1
+            assert not tts_model._model_pool[0].reinitializing
+            assert tts_model._model_pool[0].requests_served >= 2
+        finally:
+            tts_model._reinit_lock.release()
+
+    asyncio.run(scenario())
+
+
+def test_recovery_resets_pool_error_state(monkeypatch):
+    """When the last slot recovers the pool returns to READY from ERROR."""
+    load_calls = count()
+
+    def factory_for_load(name: str):
+        call = next(load_calls)
+        if call < 1:
+            return FatalFailingModel(name)
+        return RecordingModel(name)
+
+    _configure_test_pool(monkeypatch, pool_size=1, model_factory=factory_for_load)
+    monkeypatch.setattr(tts_model, "SLOT_RECOVERY_INITIAL_BACKOFF_SECONDS", 0.0)
+
+    async def scenario():
+        await tts_model.initialize_model()
+
+        lease = await tts_model.acquire_model_lease(0)
+        with pytest.raises(RuntimeError):
+            await speech._generate_chunk_audio(
+                lease=lease, chunk="hello",
+                voice_sample_path=Config.VOICE_SAMPLE_PATH,
+                language_id=None, exaggeration=None, cfg_weight=None, temperature=None,
+            )
+        await tts_model.release_model_lease(lease)
+
+        assert tts_model.get_initialization_state() == "error"
+
+        recovered = await _wait_until(
+            lambda: tts_model.get_initialization_state() == "ready"
+        )
+        assert recovered, "pool state did not return to ready after recovery"
+
+    asyncio.run(scenario())
