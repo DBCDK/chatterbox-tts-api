@@ -13,6 +13,14 @@ class TestHealthAndModels:
         assert "config" in data
         assert "model_loaded" in data
 
+    def test_health_exposes_min_text_length(self, api_client):
+        response = api_client.get("/health")
+        assert response.status_code == 200
+        config = response.json()["config"]
+        assert "min_text_length" in config
+        assert isinstance(config["min_text_length"], int)
+        assert config["min_text_length"] >= 1
+
     def test_ping(self, api_client):
         response = api_client.get("/ping")
         assert response.status_code == 200
@@ -89,3 +97,15 @@ class TestValidation:
             json={"input": TEST_TEXTS["very_long"]},
         )
         assert response.status_code == 400
+
+    def test_text_too_short_returns_400(self, api_client):
+        min_length = api_client.get("/health").json()["config"]["min_text_length"]
+        short_input = "x" * (min_length - 1)
+        response = api_client.post(
+            "/v1/audio/speech",
+            json={"input": short_input},
+        )
+        assert response.status_code == 400
+        detail = response.json()["detail"]["error"]
+        assert "too short" in detail["message"]
+        assert detail["type"] == "invalid_request_error"

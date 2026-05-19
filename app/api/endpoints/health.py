@@ -58,6 +58,7 @@ async def health_check():
         model_loaded=model is not None and pool_status["healthy_instances"] > 0,
         device=device or "unknown",
         config={
+            "min_text_length": Config.MIN_TEXT_LENGTH,
             "max_chunk_length": Config.MAX_CHUNK_LENGTH,
             "max_total_length": Config.MAX_TOTAL_LENGTH,
             "model_instance_count": Config.MODEL_INSTANCE_COUNT,
