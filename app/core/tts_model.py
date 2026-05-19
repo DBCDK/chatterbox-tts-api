@@ -68,6 +68,34 @@ class ModelPoolExhaustedError(ModelPoolError):
     """Raised when no model lease is available within the timeout."""
 
 
+# Retire a slot after this many consecutive non-fatal generation failures in a row.
+# A successful request resets the counter. Fatal errors retire the slot immediately.
+MAX_CONSECUTIVE_SLOT_FAILURES = 5
+
+
+def is_fatal_generation_error(exc: Exception) -> bool:
+    """Return True only for errors that leave the model instance in an unrecoverable state.
+
+    Fatal: CUDA OOM, CUDA device errors, NCCL failures — the GPU is in a bad state.
+    Non-fatal (transient): everything else — bad input, numerical edge cases, etc.
+    """
+    try:
+        import torch
+        if isinstance(exc, torch.cuda.OutOfMemoryError):
+            return True
+        cuda_error = getattr(torch.cuda, "CudaError", None)
+        if cuda_error and isinstance(exc, cuda_error):
+            return True
+    except Exception:
+        pass
+
+    if isinstance(exc, RuntimeError):
+        msg = str(exc).upper()
+        return "CUDA" in msg or "NCCL" in msg
+
+    return False
+
+
 @dataclass
 class ModelSlot:
     instance_id: int
@@ -75,6 +103,7 @@ class ModelSlot:
     device: str
     healthy: bool = True
     last_error: Optional[str] = None
+    consecutive_failures: int = 0
 
 
 @dataclass
@@ -83,11 +112,16 @@ class ModelLease:
     model: Any
     device: str
     broken: bool = False
+    soft_failure: bool = False
     failure_reason: Optional[str] = None
     released: bool = False
 
     def mark_broken(self, reason: str):
         self.broken = True
+        self.failure_reason = reason
+
+    def mark_soft_failure(self, reason: str):
+        self.soft_failure = True
         self.failure_reason = reason
 
 
@@ -465,6 +499,19 @@ async def release_model_lease(lease: Optional[ModelLease]):
             lease.instance_id, lease.failure_reason or ""
         )
         return
+
+    if lease.soft_failure:
+        slot.consecutive_failures += 1
+        slot.last_error = lease.failure_reason
+        if slot.consecutive_failures >= MAX_CONSECUTIVE_SLOT_FAILURES:
+            slot.healthy = False
+            _update_runtime_after_slot_failure(
+                lease.instance_id,
+                f"retired after {slot.consecutive_failures} consecutive failures: {lease.failure_reason}",
+            )
+            return
+    else:
+        slot.consecutive_failures = 0
 
     if slot.healthy and _available_model_ids is not None:
         _available_model_ids.put_nowait(lease.instance_id)

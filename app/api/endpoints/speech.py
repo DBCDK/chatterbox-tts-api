@@ -33,6 +33,7 @@ from app.core.tts_model import (
     ModelPoolExhaustedError,
     acquire_model_lease,
     get_default_language,
+    is_fatal_generation_error,
     is_multilingual,
     release_model_lease,
     supports_language,
@@ -352,7 +353,10 @@ async def _generate_chunk_audio(
                 ),
             )
     except Exception as exc:
-        lease.mark_broken(str(exc))
+        if is_fatal_generation_error(exc):
+            lease.mark_broken(str(exc))
+        else:
+            lease.mark_soft_failure(str(exc))
         raise
 
     return (
