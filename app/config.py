@@ -25,7 +25,7 @@ class Config:
     TEMPERATURE = float(os.getenv("TEMPERATURE", 0.8))
 
     # Text processing
-    MIN_TEXT_LENGTH = int(os.getenv("MIN_TEXT_LENGTH", "10"))
+    MIN_TEXT_LENGTH = int(os.getenv("MIN_TEXT_LENGTH", 2))
     MAX_CHUNK_LENGTH = int(os.getenv("MAX_CHUNK_LENGTH", 280))
     MAX_TOTAL_LENGTH = int(os.getenv("MAX_TOTAL_LENGTH", 3000))
     MODEL_INSTANCE_COUNT = int(os.getenv("MODEL_INSTANCE_COUNT", 2))
