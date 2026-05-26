@@ -25,9 +25,10 @@ class Config:
     TEMPERATURE = float(os.getenv("TEMPERATURE", 0.8))
 
     # Text processing
+    MIN_TEXT_LENGTH = int(os.getenv("MIN_TEXT_LENGTH", 2))
     MAX_CHUNK_LENGTH = int(os.getenv("MAX_CHUNK_LENGTH", 280))
     MAX_TOTAL_LENGTH = int(os.getenv("MAX_TOTAL_LENGTH", 3000))
-    MODEL_INSTANCE_COUNT = int(os.getenv("MODEL_INSTANCE_COUNT", 2))
+    MODEL_INSTANCE_COUNT = int(os.getenv("MODEL_INSTANCE_COUNT", 4))
     MAX_QUEUE_WAIT_SECONDS = float(os.getenv("MAX_QUEUE_WAIT_SECONDS", 60))
     REQUEST_TIMEOUT_SECONDS = float(os.getenv("REQUEST_TIMEOUT_SECONDS", 120))
 
@@ -158,6 +159,15 @@ class Config:
         if not (0.05 <= cls.TEMPERATURE <= 5.0):
             raise ValueError(
                 f"TEMPERATURE must be between 0.05 and 5.0, got {cls.TEMPERATURE}"
+            )
+        if cls.MIN_TEXT_LENGTH < 1:
+            raise ValueError(
+                f"MIN_TEXT_LENGTH must be at least 1, got {cls.MIN_TEXT_LENGTH}"
+            )
+        if cls.MIN_TEXT_LENGTH >= cls.MAX_TOTAL_LENGTH:
+            raise ValueError(
+                f"MIN_TEXT_LENGTH ({cls.MIN_TEXT_LENGTH}) must be less than "
+                f"MAX_TOTAL_LENGTH ({cls.MAX_TOTAL_LENGTH})"
             )
         if cls.MAX_CHUNK_LENGTH <= 0:
             raise ValueError(

@@ -47,6 +47,7 @@ _model_metadata: Dict[str, Any] = {
 }
 _model_pool: list["ModelSlot"] = []
 _available_model_ids: Optional[asyncio.Queue[int]] = None
+_reinit_lock: Optional[asyncio.Lock] = None
 
 
 class InitializationState(Enum):
@@ -68,6 +69,44 @@ class ModelPoolExhaustedError(ModelPoolError):
     """Raised when no model lease is available within the timeout."""
 
 
+# Retire a slot after this many consecutive non-fatal generation failures in a row.
+# A successful request resets the counter. Fatal errors retire the slot immediately.
+MAX_CONSECUTIVE_SLOT_FAILURES = 5
+
+# Reinitialize a failed slot up to this many times before giving up permanently.
+MAX_SLOT_RECOVERY_ATTEMPTS = 3
+
+# Initial backoff for failure recovery; doubles on each retry (5 → 10 → 20 s).
+SLOT_RECOVERY_INITIAL_BACKOFF_SECONDS = 5.0
+
+# Proactively reload a slot after this many requests to clear accumulated
+# attention hooks and GPU memory fragmentation.
+SLOT_REFRESH_AFTER_REQUESTS = 200
+
+
+def is_fatal_generation_error(exc: Exception) -> bool:
+    """Return True only for errors that leave the model instance in an unrecoverable state.
+
+    Fatal: CUDA OOM, CUDA device errors, NCCL failures — the GPU is in a bad state.
+    Non-fatal (transient): everything else — bad input, numerical edge cases, etc.
+    """
+    try:
+        import torch
+        if isinstance(exc, torch.cuda.OutOfMemoryError):
+            return True
+        cuda_error = getattr(torch.cuda, "CudaError", None)
+        if cuda_error and isinstance(exc, cuda_error):
+            return True
+    except Exception:
+        pass
+
+    if isinstance(exc, RuntimeError):
+        msg = str(exc).upper()
+        return "CUDA" in msg or "NCCL" in msg
+
+    return False
+
+
 @dataclass
 class ModelSlot:
     instance_id: int
@@ -75,6 +114,9 @@ class ModelSlot:
     device: str
     healthy: bool = True
     last_error: Optional[str] = None
+    consecutive_failures: int = 0
+    requests_served: int = 0
+    reinitializing: bool = False
 
 
 @dataclass
@@ -83,6 +125,7 @@ class ModelLease:
     model: Any
     device: str
     broken: bool = False
+    soft_failure: bool = False
     failure_reason: Optional[str] = None
     released: bool = False
 
@@ -90,11 +133,15 @@ class ModelLease:
         self.broken = True
         self.failure_reason = reason
 
+    def mark_soft_failure(self, reason: str):
+        self.soft_failure = True
+        self.failure_reason = reason
+
 
 def _reset_runtime_state():
     global _model, _device, _initialization_state, _initialization_error
     global _initialization_progress, _is_multilingual, _supported_languages
-    global _model_metadata, _model_pool, _available_model_ids
+    global _model_metadata, _model_pool, _available_model_ids, _reinit_lock
 
     _model = None
     _device = None
@@ -115,6 +162,7 @@ def _reset_runtime_state():
     }
     _model_pool = []
     _available_model_ids = None
+    _reinit_lock = None
     observe_pool_status(
         {
             "configured_instances": Config.MODEL_INSTANCE_COUNT,
@@ -246,12 +294,105 @@ def _update_runtime_after_slot_failure(instance_id: int, reason: str):
         reason=reason,
     )
 
+    slot = _model_pool[instance_id]
+    if not slot.reinitializing:
+        asyncio.create_task(_reinitialize_slot(instance_id, "failure"))
+
+
+async def _reinitialize_slot(instance_id: int, reason: str) -> None:
+    """Reload a single model slot. Used for both failure recovery and scheduled refresh."""
+    global _initialization_state
+
+    if _reinit_lock is None:
+        return
+
+    async with _reinit_lock:
+        slot = _model_pool[instance_id]
+        slot.reinitializing = True
+        loop = asyncio.get_running_loop()
+
+        log_event(
+            logger, logging.INFO, "model_instance_reinit_started",
+            model_instance_id=instance_id, reason=reason,
+        )
+
+        # Free GPU memory before loading. On a single-GPU deployment both
+        # instances share the device; the old model must be released first.
+        slot.model = None
+        try:
+            import torch
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+
+        is_recovery = reason == "failure"
+        max_attempts = MAX_SLOT_RECOVERY_ATTEMPTS if is_recovery else 2
+        backoff = SLOT_RECOVERY_INITIAL_BACKOFF_SECONDS if is_recovery else 0.0
+
+        for attempt in range(1, max_attempts + 1):
+            if backoff > 0:
+                await asyncio.sleep(backoff)
+                backoff *= 2
+
+            log_event(
+                logger, logging.INFO, "model_instance_reinit_attempt",
+                model_instance_id=instance_id, reason=reason, attempt=attempt,
+            )
+
+            try:
+                model_source = Config.get_model_source()
+                model_class = Config.get_model_class()
+                new_model, _ = await loop.run_in_executor(
+                    None,
+                    lambda ms=model_source, mc=model_class, dv=slot.device: (
+                        _load_model_sync(ms, mc, dv)
+                    ),
+                )
+            except Exception as exc:
+                log_event(
+                    logger, logging.WARNING, "model_instance_reinit_attempt_failed",
+                    model_instance_id=instance_id, reason=reason,
+                    attempt=attempt, error=str(exc),
+                )
+                if attempt == max_attempts:
+                    slot.healthy = False
+                    slot.reinitializing = False
+                    _update_runtime_after_slot_failure(
+                        instance_id,
+                        f"reinit exhausted after {attempt} attempts: {exc}",
+                    )
+                return
+
+            slot.model = new_model
+            slot.healthy = True
+            slot.last_error = None
+            slot.requests_served = 0
+            slot.consecutive_failures = 0
+            slot.reinitializing = False
+
+            if _available_model_ids is not None:
+                _available_model_ids.put_nowait(instance_id)
+
+            if _initialization_state == InitializationState.ERROR.value:
+                _initialization_state = InitializationState.READY.value
+                _initialization_progress = (
+                    f"Pool recovered: {_healthy_slot_count()}/{len(_model_pool)} instances healthy"
+                )
+
+            observe_pool_status(get_pool_status())
+            log_event(
+                logger, logging.INFO, "model_instance_reinit_completed",
+                model_instance_id=instance_id, reason=reason,
+                healthy_instances=_healthy_slot_count(),
+            )
+            return
+
 
 async def initialize_model():
     """Initialize the configured pool of Chatterbox TTS models."""
     global _model, _device, _initialization_state, _initialization_error
     global _initialization_progress, _is_multilingual, _supported_languages
-    global _model_metadata, _model_pool, _available_model_ids
+    global _model_metadata, _model_pool, _available_model_ids, _reinit_lock
 
     overall_started_at = asyncio.get_running_loop().time()
     try:
@@ -350,6 +491,7 @@ async def initialize_model():
 
         _model_pool = loaded_slots
         _available_model_ids = available_ids
+        _reinit_lock = asyncio.Lock()
         _model = loaded_slots[0].model if loaded_slots else None
         _is_multilingual = model_class == "multilingual"
         _supported_languages = _resolve_supported_languages(model_source, model_class)
@@ -464,6 +606,31 @@ async def release_model_lease(lease: Optional[ModelLease]):
         _update_runtime_after_slot_failure(
             lease.instance_id, lease.failure_reason or ""
         )
+        return
+
+    if lease.soft_failure:
+        slot.consecutive_failures += 1
+        slot.last_error = lease.failure_reason
+        if slot.consecutive_failures >= MAX_CONSECUTIVE_SLOT_FAILURES:
+            slot.healthy = False
+            _update_runtime_after_slot_failure(
+                lease.instance_id,
+                f"retired after {slot.consecutive_failures} consecutive failures: {lease.failure_reason}",
+            )
+            return
+    else:
+        slot.consecutive_failures = 0
+
+    slot.requests_served += 1
+
+    if (
+        slot.requests_served >= SLOT_REFRESH_AFTER_REQUESTS
+        and _reinit_lock is not None
+        and not _reinit_lock.locked()
+    ):
+        slot.reinitializing = True
+        asyncio.create_task(_reinitialize_slot(slot.instance_id, "scheduled_refresh"))
+        observe_pool_status(get_pool_status())
         return
 
     if slot.healthy and _available_model_ids is not None:

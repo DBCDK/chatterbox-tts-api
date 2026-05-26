@@ -33,6 +33,7 @@ from app.core.tts_model import (
     ModelPoolExhaustedError,
     acquire_model_lease,
     get_default_language,
+    is_fatal_generation_error,
     is_multilingual,
     release_model_lease,
     supports_language,
@@ -259,6 +260,18 @@ async def _acquire_request_lease(context: RequestRuntimeContext) -> ModelLease:
 
 
 def _validate_text_length(text: str, mode: Optional[str] = None):
+    if len(text) < Config.MIN_TEXT_LENGTH:
+        if mode is not None:
+            observe_request_failure("input_too_short", "validation", mode)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": {
+                    "message": f"Input text too short. Minimum {Config.MIN_TEXT_LENGTH} characters required.",
+                    "type": "invalid_request_error",
+                }
+            },
+        )
     if len(text) > Config.MAX_TOTAL_LENGTH:
         if mode is not None:
             observe_request_failure("input_too_long", "validation", mode)
@@ -352,7 +365,10 @@ async def _generate_chunk_audio(
                 ),
             )
     except Exception as exc:
-        lease.mark_broken(str(exc))
+        if is_fatal_generation_error(exc):
+            lease.mark_broken(str(exc))
+        else:
+            lease.mark_soft_failure(str(exc))
         raise
 
     return (

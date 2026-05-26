@@ -2,12 +2,13 @@
 Health check and status endpoints
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from app.config import Config
 from app.core import get_memory_info
 from app.models import HealthResponse
 from app.core.tts_model import (
+    InitializationState,
     get_model,
     get_device,
     get_model_info,
@@ -58,6 +59,7 @@ async def health_check():
         model_loaded=model is not None and pool_status["healthy_instances"] > 0,
         device=device or "unknown",
         config={
+            "min_text_length": Config.MIN_TEXT_LENGTH,
             "max_chunk_length": Config.MAX_CHUNK_LENGTH,
             "max_total_length": Config.MAX_TOTAL_LENGTH,
             "model_instance_count": Config.MODEL_INSTANCE_COUNT,
@@ -81,6 +83,39 @@ async def health_check():
         initialization_progress=init_progress,
         initialization_error=init_error,
     )
+
+
+@base_router.get(
+    "/healthz/live",
+    summary="Liveness probe",
+    description=(
+        "Returns 200 while the pod should keep running. "
+        "Returns 503 when the model pool has permanently failed and the pod should be restarted."
+    ),
+)
+async def liveness_probe(response: Response):
+    if get_initialization_state() == InitializationState.ERROR.value:
+        from app.core import tts_model as _tts_model
+        recovering = any(s.reinitializing for s in _tts_model._model_pool)
+        if not recovering:
+            response.status_code = 503
+            return {"status": "dead", "reason": "model pool permanently failed"}
+    return {"status": "alive"}
+
+
+@base_router.get(
+    "/healthz/ready",
+    summary="Readiness probe",
+    description=(
+        "Returns 200 when the pod is ready to serve TTS requests. "
+        "Returns 503 during initialisation or when no healthy model instances are available."
+    ),
+)
+async def readiness_probe(response: Response):
+    if not is_ready():
+        response.status_code = 503
+        return {"status": "not_ready", "initialization_state": get_initialization_state()}
+    return {"status": "ready"}
 
 
 @base_router.get(
