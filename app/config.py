@@ -26,7 +26,6 @@ class Config:
 
     # Text processing
     MIN_TEXT_LENGTH = int(os.getenv("MIN_TEXT_LENGTH", 2))
-    MAX_CHUNK_LENGTH = int(os.getenv("MAX_CHUNK_LENGTH", 280))
     MAX_TOTAL_LENGTH = int(os.getenv("MAX_TOTAL_LENGTH", 3000))
     MODEL_INSTANCE_COUNT = int(os.getenv("MODEL_INSTANCE_COUNT", 4))
     MAX_QUEUE_WAIT_SECONDS = float(os.getenv("MAX_QUEUE_WAIT_SECONDS", 60))
@@ -37,7 +36,7 @@ class Config:
     DEVICE_OVERRIDE = os.getenv("DEVICE", "auto")
     MODEL_CACHE_DIR = os.getenv("MODEL_CACHE_DIR", "./models")
     MODEL_SOURCE = os.getenv("MODEL_SOURCE", "default").strip().lower()
-    MODEL_CLASS = (os.getenv("MODEL_CLASS") or "").strip().lower()
+    MODEL_TYPE = (os.getenv("MODEL_TYPE") or "").strip().lower()
     MODEL_REPO_ID = (os.getenv("MODEL_REPO_ID") or "").strip()
     MODEL_REVISION = (os.getenv("MODEL_REVISION") or "").strip() or None
     MODEL_LOCAL_PATH = (os.getenv("MODEL_LOCAL_PATH") or "").strip() or None
@@ -47,11 +46,13 @@ class Config:
     DEFAULT_LANGUAGE = (os.getenv("DEFAULT_LANGUAGE") or "").strip().lower() or None
     HF_TOKEN = (os.getenv("HF_TOKEN") or "").strip() or None
     HF_ALLOW_PATTERNS_RAW = (os.getenv("HF_ALLOW_PATTERNS") or "").strip()
+    NORMALIZE_TEXT = os.getenv("NORMALIZE_TEXT", "true").lower() == "true"
+    USE_FAST_INFERENCE = os.getenv("USE_FAST_INFERENCE", "false").lower() == "true"
 
-    # Multilingual model settings
-    USE_MULTILINGUAL_MODEL = (
-        os.getenv("USE_MULTILINGUAL_MODEL", "true").lower() == "true"
-    )
+    # Generation parameters
+    TOP_P = float(os.getenv("TOP_P", 1.0))
+    MIN_P = float(os.getenv("MIN_P", 0.05))
+    REPETITION_PENALTY = float(os.getenv("REPETITION_PENALTY", 2.0))
 
     # CORS settings
     CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*")
@@ -121,10 +122,8 @@ class Config:
         return cls.MODEL_SOURCE or "default"
 
     @classmethod
-    def get_model_class(cls):
-        if cls.get_model_source() == "default":
-            return "multilingual" if cls.USE_MULTILINGUAL_MODEL else "standard"
-        return cls.MODEL_CLASS
+    def get_model_type(cls):
+        return cls.MODEL_TYPE or "multilingual"
 
     @classmethod
     def get_configured_supported_languages(cls):
@@ -135,9 +134,9 @@ class Config:
         if cls.DEFAULT_LANGUAGE:
             return cls.DEFAULT_LANGUAGE
 
-        model_class = cls.get_model_class()
+        model_type = cls.get_model_type()
         configured_languages = cls.get_configured_supported_languages()
-        if model_class == "multilingual" and configured_languages:
+        if model_type == "multilingual" and configured_languages:
             return next(iter(configured_languages.keys()))
         return "en"
 
@@ -169,10 +168,6 @@ class Config:
                 f"MIN_TEXT_LENGTH ({cls.MIN_TEXT_LENGTH}) must be less than "
                 f"MAX_TOTAL_LENGTH ({cls.MAX_TOTAL_LENGTH})"
             )
-        if cls.MAX_CHUNK_LENGTH <= 0:
-            raise ValueError(
-                f"MAX_CHUNK_LENGTH must be positive, got {cls.MAX_CHUNK_LENGTH}"
-            )
         if cls.MAX_TOTAL_LENGTH <= 0:
             raise ValueError(
                 f"MAX_TOTAL_LENGTH must be positive, got {cls.MAX_TOTAL_LENGTH}"
@@ -191,16 +186,23 @@ class Config:
                 "REQUEST_TIMEOUT_SECONDS must be positive, "
                 f"got {cls.REQUEST_TIMEOUT_SECONDS}"
             )
+        if not (0.0 < cls.TOP_P <= 1.0):
+            raise ValueError(f"TOP_P must be in (0.0, 1.0], got {cls.TOP_P}")
+        if not (0.0 <= cls.MIN_P < 1.0):
+            raise ValueError(f"MIN_P must be in [0.0, 1.0), got {cls.MIN_P}")
+        if cls.REPETITION_PENALTY < 1.0:
+            raise ValueError(f"REPETITION_PENALTY must be >= 1.0, got {cls.REPETITION_PENALTY}")
+
         model_source = cls.get_model_source()
         if model_source not in {"default", "hf_repo", "local_dir"}:
             raise ValueError(
                 f"MODEL_SOURCE must be one of: default, hf_repo, local_dir. Got {model_source}"
             )
 
-        model_class = cls.get_model_class()
-        if model_class not in {"standard", "multilingual"}:
+        model_type = cls.get_model_type()
+        if model_type not in {"base", "multilingual", "turbo"}:
             raise ValueError(
-                f"MODEL_CLASS must resolve to standard or multilingual. Got {model_class!r}"
+                f"MODEL_TYPE must be one of: base, multilingual, turbo. Got {model_type!r}"
             )
 
         if model_source == "hf_repo" and not cls.MODEL_REPO_ID:
@@ -212,7 +214,7 @@ class Config:
         configured_languages = cls.get_configured_supported_languages()
         if (
             model_source in {"hf_repo", "local_dir"}
-            and model_class == "multilingual"
+            and model_type == "multilingual"
             and not configured_languages
         ):
             raise ValueError(
