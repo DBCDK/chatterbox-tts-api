@@ -16,7 +16,6 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.config import Config
-from app.core import concatenate_audio_chunks, split_text_into_chunks
 from app.core.metrics import (
     observe_lease_acquire_failure,
     observe_request_failure,
@@ -26,7 +25,6 @@ from app.core.metrics import (
     observe_time_to_first_chunk,
 )
 from app.core.observability import get_logger, log_event
-from app.core.text_processing import get_streaming_settings, split_text_for_streaming
 from app.core.tts_model import (
     ModelLease,
     ModelNotReadyError,
@@ -318,62 +316,26 @@ def _validate_language_for_generation(
 
 def _generation_kwargs(
     text: str,
-    voice_sample_path: str,
     language_id: Optional[str],
     exaggeration: Optional[float],
     cfg_weight: Optional[float],
     temperature: Optional[float],
+    top_p: Optional[float],
+    min_p: Optional[float],
+    repetition_penalty: Optional[float],
 ) -> dict:
     kwargs = {
         "text": text,
-        "audio_prompt_path": voice_sample_path,
-        "exaggeration": exaggeration
-        if exaggeration is not None
-        else Config.EXAGGERATION,
+        "exaggeration": exaggeration if exaggeration is not None else Config.EXAGGERATION,
         "cfg_weight": cfg_weight if cfg_weight is not None else Config.CFG_WEIGHT,
         "temperature": temperature if temperature is not None else Config.TEMPERATURE,
+        "top_p": top_p if top_p is not None else Config.TOP_P,
+        "min_p": min_p if min_p is not None else Config.MIN_P,
+        "repetition_penalty": repetition_penalty if repetition_penalty is not None else Config.REPETITION_PENALTY,
     }
     if is_multilingual() and language_id:
         kwargs["language_id"] = language_id
     return kwargs
-
-
-async def _generate_chunk_audio(
-    lease: ModelLease,
-    chunk: str,
-    voice_sample_path: str,
-    language_id: Optional[str],
-    exaggeration: Optional[float],
-    cfg_weight: Optional[float],
-    temperature: Optional[float],
-) -> torch.Tensor:
-    loop = asyncio.get_running_loop()
-
-    try:
-        with torch.no_grad():
-            audio_tensor = await loop.run_in_executor(
-                None,
-                lambda: lease.model.generate(
-                    **_generation_kwargs(
-                        text=chunk,
-                        voice_sample_path=voice_sample_path,
-                        language_id=language_id,
-                        exaggeration=exaggeration,
-                        cfg_weight=cfg_weight,
-                        temperature=temperature,
-                    )
-                ),
-            )
-    except Exception as exc:
-        if is_fatal_generation_error(exc):
-            lease.mark_broken(str(exc))
-        else:
-            lease.mark_soft_failure(str(exc))
-        raise
-
-    return (
-        audio_tensor.detach().cpu() if hasattr(audio_tensor, "detach") else audio_tensor
-    )
 
 
 async def _generate_full_audio(
@@ -385,38 +347,44 @@ async def _generate_full_audio(
     exaggeration: Optional[float],
     cfg_weight: Optional[float],
     temperature: Optional[float],
+    top_p: Optional[float],
+    min_p: Optional[float],
+    repetition_penalty: Optional[float],
 ) -> tuple[io.BytesIO, float]:
     _validate_text_length(text)
+    _raise_if_request_expired(context, "generation")
+    loop = asyncio.get_running_loop()
 
-    chunks = split_text_into_chunks(text, Config.MAX_CHUNK_LENGTH)
-    audio_chunks: list[torch.Tensor] = []
     try:
-        for chunk in chunks:
-            _raise_if_request_expired(context, "chunk_generation")
-            audio_chunks.append(
-                await _generate_chunk_audio(
-                    lease=lease,
-                    chunk=chunk,
-                    voice_sample_path=voice_sample_path,
-                    language_id=language_id,
-                    exaggeration=exaggeration,
-                    cfg_weight=cfg_weight,
-                    temperature=temperature,
-                )
+        with torch.no_grad():
+            audio_tensor = await loop.run_in_executor(
+                None,
+                lambda: lease.model.generate(
+                    **_generation_kwargs(
+                        text=text,
+                        language_id=language_id,
+                        exaggeration=exaggeration,
+                        cfg_weight=cfg_weight,
+                        temperature=temperature,
+                        top_p=top_p,
+                        min_p=min_p,
+                        repetition_penalty=repetition_penalty,
+                    )
+                ),
             )
+    except Exception as exc:
+        if is_fatal_generation_error(exc):
+            lease.mark_broken(str(exc))
+        else:
+            lease.mark_soft_failure(str(exc))
+        raise
 
-        _raise_if_request_expired(context, "response_encoding")
-        final_audio = (
-            concatenate_audio_chunks(audio_chunks, lease.model.sr)
-            if len(audio_chunks) > 1
-            else audio_chunks[0]
-        )
-        buffer = io.BytesIO()
-        ta.save(buffer, final_audio, lease.model.sr, format="wav")
-        buffer.seek(0)
-        return buffer, _audio_duration_seconds(final_audio, lease.model.sr)
-    finally:
-        audio_chunks.clear()
+    audio_tensor = audio_tensor.detach().cpu()
+    _raise_if_request_expired(context, "response_encoding")
+    buffer = io.BytesIO()
+    ta.save(buffer, audio_tensor, lease.model.sr, format="wav")
+    buffer.seek(0)
+    return buffer, _audio_duration_seconds(audio_tensor, lease.model.sr)
 
 
 async def generate_speech_internal(
@@ -426,6 +394,9 @@ async def generate_speech_internal(
     exaggeration: Optional[float] = None,
     cfg_weight: Optional[float] = None,
     temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
+    min_p: Optional[float] = None,
+    repetition_penalty: Optional[float] = None,
 ) -> io.BytesIO:
     _validate_text_length(text, "audio")
     resolved_language = _validate_language_for_generation(language_id, "audio")
@@ -450,6 +421,9 @@ async def generate_speech_internal(
             exaggeration=exaggeration,
             cfg_weight=cfg_weight,
             temperature=temperature,
+            top_p=top_p,
+            min_p=min_p,
+            repetition_penalty=repetition_penalty,
         )
         observe_request_finished(
             "/v1/audio/speech",
@@ -459,7 +433,6 @@ async def generate_speech_internal(
             lease_wait_seconds=context.lease_wait_seconds(),
             generation_duration_seconds=context.generation_elapsed_seconds(),
             audio_seconds=round(audio_seconds, 6),
-            chunk_count=len(split_text_into_chunks(text, Config.MAX_CHUNK_LENGTH)),
         )
         return buffer
     except RequestTimeoutExceeded as exc:
@@ -497,23 +470,11 @@ async def generate_speech_sse(
     exaggeration: Optional[float] = None,
     cfg_weight: Optional[float] = None,
     temperature: Optional[float] = None,
-    streaming_chunk_size: Optional[int] = None,
-    streaming_strategy: Optional[str] = None,
-    streaming_quality: Optional[str] = None,
+    top_p: Optional[float] = None,
+    min_p: Optional[float] = None,
+    repetition_penalty: Optional[float] = None,
 ) -> AsyncGenerator[str, None]:
-    settings = get_streaming_settings(
-        streaming_chunk_size,
-        streaming_strategy,
-        streaming_quality,
-    )
-    text_chunks = split_text_for_streaming(
-        text,
-        chunk_size=settings["chunk_size"],
-        strategy=settings["strategy"],
-        quality=settings["quality"],
-    )
-    chunk_count = len(text_chunks)
-
+    chunk_count = 0
     try:
         await _guard_request_state(context, "sse_start")
         info_event = SSEAudioInfo(
@@ -525,26 +486,28 @@ async def generate_speech_sse(
 
         total_frames = 0
         first_chunk_observed = False
-        for chunk in text_chunks:
-            await _guard_request_state(context, "chunk_generation")
-            audio_tensor = await _generate_chunk_audio(
-                lease=lease,
-                chunk=chunk,
-                voice_sample_path=voice_sample_path,
+
+        async for audio_tensor in lease.model.generate_stream_async(
+            **_generation_kwargs(
+                text=text,
                 language_id=language_id,
                 exaggeration=exaggeration,
                 cfg_weight=cfg_weight,
                 temperature=temperature,
+                top_p=top_p,
+                min_p=min_p,
+                repetition_penalty=repetition_penalty,
             )
-            await _guard_request_state(context, "chunk_emit")
+        ):
+            await _guard_request_state(context, "chunk_generation")
+            audio_tensor = audio_tensor.detach().cpu()
             if not first_chunk_observed:
-                observe_time_to_first_chunk(
-                    "/v1/audio/speech", context.elapsed_seconds()
-                )
+                observe_time_to_first_chunk("/v1/audio/speech", context.elapsed_seconds())
                 first_chunk_observed = True
+            chunk_count += 1
             total_frames += _audio_num_frames(audio_tensor)
             pcm_tensor = (torch.clamp(audio_tensor, -1.0, 1.0) * 32767).to(torch.int16)
-            payload = base64.b64encode(pcm_tensor.numpy().tobytes()).decode("ascii")
+            payload = base64.b64encode(pcm_tensor.squeeze().numpy().tobytes()).decode("ascii")
             yield f"data: {SSEAudioDelta(audio=payload).model_dump_json()}\n\n"
 
         await _guard_request_state(context, "done_event")
@@ -682,9 +645,9 @@ async def text_to_speech(request: TTSRequest, client_request: Request):
                 exaggeration=request.exaggeration,
                 cfg_weight=request.cfg_weight,
                 temperature=request.temperature,
-                streaming_chunk_size=request.streaming_chunk_size,
-                streaming_strategy=request.streaming_strategy,
-                streaming_quality=request.streaming_quality,
+                top_p=request.top_p,
+                min_p=request.min_p,
+                repetition_penalty=request.repetition_penalty,
             ),
             media_type="text/event-stream",
             headers={
@@ -717,6 +680,9 @@ async def text_to_speech(request: TTSRequest, client_request: Request):
             exaggeration=request.exaggeration,
             cfg_weight=request.cfg_weight,
             temperature=request.temperature,
+            top_p=request.top_p,
+            min_p=request.min_p,
+            repetition_penalty=request.repetition_penalty,
         )
         response = StreamingResponse(
             io.BytesIO(buffer.getvalue()),
@@ -737,9 +703,6 @@ async def text_to_speech(request: TTSRequest, client_request: Request):
             outcome="success",
             input_chars=len(request.input),
             audio_seconds=round(audio_seconds, 6),
-            chunk_count=len(
-                split_text_into_chunks(request.input, Config.MAX_CHUNK_LENGTH)
-            ),
         )
         observe_request_finished(
             "/v1/audio/speech",
@@ -749,9 +712,6 @@ async def text_to_speech(request: TTSRequest, client_request: Request):
             lease_wait_seconds=context.lease_wait_seconds(),
             generation_duration_seconds=context.generation_elapsed_seconds(),
             audio_seconds=round(audio_seconds, 6),
-            chunk_count=len(
-                split_text_into_chunks(request.input, Config.MAX_CHUNK_LENGTH)
-            ),
         )
         return response
     except RequestTimeoutExceeded as exc:
