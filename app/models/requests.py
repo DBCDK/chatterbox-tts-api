@@ -33,6 +33,9 @@ class TTSRequest(BaseModel):
     temperature: Optional[float] = Field(
         None, description="Sampling temperature", ge=0.05, le=5.0
     )
+    top_p: Optional[float] = Field(None, description="Nucleus sampling threshold", ge=0.0, le=1.0)
+    min_p: Optional[float] = Field(None, description="Minimum probability threshold", ge=0.0, le=1.0)
+    repetition_penalty: Optional[float] = Field(None, description="Repitition penalty", ge=1.0, le=2.0)
 
     # Streaming-specific parameters
     streaming_chunk_size: Optional[int] = Field(

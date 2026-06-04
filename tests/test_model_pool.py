@@ -132,6 +132,9 @@ def test_request_failure_releases_healthy_lease(monkeypatch):
                 exaggeration=None,
                 cfg_weight=None,
                 temperature=None,
+                top_p=None,
+                min_p=None,
+                repetition_penalty=None,
             )
 
         await tts_model.release_model_lease(lease)
@@ -160,6 +163,9 @@ def test_non_fatal_error_keeps_slot_healthy(monkeypatch):
                 exaggeration=None,
                 cfg_weight=None,
                 temperature=None,
+                top_p=None,
+                min_p=None,
+                repetition_penalty=None,
             )
 
         await tts_model.release_model_lease(lease)
@@ -189,6 +195,9 @@ def test_fatal_error_retires_slot_immediately(monkeypatch):
                 exaggeration=None,
                 cfg_weight=None,
                 temperature=None,
+                top_p=None,
+                min_p=None,
+                repetition_penalty=None,
             )
 
         await tts_model.release_model_lease(lease)
@@ -221,6 +230,9 @@ def test_non_fatal_errors_retire_slot_after_max_consecutive_failures(monkeypatch
                     exaggeration=None,
                     cfg_weight=None,
                     temperature=None,
+                    top_p=None,
+                    min_p=None,
+                    repetition_penalty=None,
                 )
             await tts_model.release_model_lease(lease)
             assert tts_model.is_ready() is True, f"slot retired too early after failure {i + 1}"
@@ -236,6 +248,9 @@ def test_non_fatal_errors_retire_slot_after_max_consecutive_failures(monkeypatch
                 exaggeration=None,
                 cfg_weight=None,
                 temperature=None,
+                top_p=None,
+                min_p=None,
+                repetition_penalty=None,
             )
         await tts_model.release_model_lease(lease)
 
@@ -275,6 +290,9 @@ def test_successful_request_resets_failure_counter(monkeypatch):
                     exaggeration=None,
                     cfg_weight=None,
                     temperature=None,
+                    top_p=None,
+                    min_p=None,
+                    repetition_penalty=None,
                 )
             await tts_model.release_model_lease(lease)
 
@@ -290,7 +308,11 @@ def test_successful_request_resets_failure_counter(monkeypatch):
             exaggeration=None,
             cfg_weight=None,
             temperature=None,
+            top_p=None,
+            min_p=None,
+            repetition_penalty=None,
         )
+
         await tts_model.release_model_lease(lease)
 
         assert tts_model._model_pool[0].consecutive_failures == 0
@@ -322,6 +344,9 @@ def test_non_streaming_request_keeps_one_stable_model(monkeypatch):
             exaggeration=None,
             cfg_weight=None,
             temperature=None,
+            top_p=None,
+            min_p=None,
+            repetition_penalty=None,
         )
 
         await tts_model.release_model_lease(lease)
@@ -354,6 +379,9 @@ def test_sse_request_keeps_one_stable_model(monkeypatch):
             exaggeration=None,
             cfg_weight=None,
             temperature=None,
+            top_p=None,
+            min_p=None,
+            repetition_penalty=None,
             streaming_chunk_size=20,
             streaming_strategy="sentence",
             streaming_quality="balanced",
@@ -410,6 +438,7 @@ def test_failed_slot_is_recovered(monkeypatch):
                 lease=lease, chunk="hello",
                 voice_sample_path=Config.VOICE_SAMPLE_PATH,
                 language_id=None, exaggeration=None, cfg_weight=None, temperature=None,
+                top_p=None, min_p=None, repetition_penalty=None,
             )
         await tts_model.release_model_lease(lease)
 
@@ -442,6 +471,7 @@ def test_slot_refreshes_after_request_threshold(monkeypatch):
                 lease=lease, chunk="hello",
                 voice_sample_path=Config.VOICE_SAMPLE_PATH,
                 language_id=None, exaggeration=None, cfg_weight=None, temperature=None,
+                top_p=None, min_p=None, repetition_penalty=None,
             )
             await tts_model.release_model_lease(lease)
 
@@ -472,6 +502,7 @@ def test_refresh_deferred_while_lock_held(monkeypatch):
                     lease=lease, chunk="hello",
                     voice_sample_path=Config.VOICE_SAMPLE_PATH,
                     language_id=None, exaggeration=None, cfg_weight=None, temperature=None,
+                    top_p=None, min_p=None, repetition_penalty=None,
                 )
                 await tts_model.release_model_lease(lease)
 
@@ -507,6 +538,7 @@ def test_recovery_resets_pool_error_state(monkeypatch):
                 lease=lease, chunk="hello",
                 voice_sample_path=Config.VOICE_SAMPLE_PATH,
                 language_id=None, exaggeration=None, cfg_weight=None, temperature=None,
+                top_p=None, min_p=None, repetition_penalty=None,
             )
         await tts_model.release_model_lease(lease)
 

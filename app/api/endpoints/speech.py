@@ -323,15 +323,22 @@ def _generation_kwargs(
     exaggeration: Optional[float],
     cfg_weight: Optional[float],
     temperature: Optional[float],
+    top_p: Optional[float],
+    min_p: Optional[float],
+    repetition_penalty: Optional[float],
 ) -> dict:
     kwargs = {
         "text": text,
-        "audio_prompt_path": voice_sample_path,
         "exaggeration": exaggeration
         if exaggeration is not None
         else Config.EXAGGERATION,
         "cfg_weight": cfg_weight if cfg_weight is not None else Config.CFG_WEIGHT,
         "temperature": temperature if temperature is not None else Config.TEMPERATURE,
+        "top_p": top_p if top_p is not None else Config.TOP_P,
+        "min_p": min_p if min_p is not None else Config.MIN_P,
+        "repetition_penalty": repetition_penalty
+        if repetition_penalty is not None
+        else Config.REPETITION_PENALTY,
     }
     if is_multilingual() and language_id:
         kwargs["language_id"] = language_id
@@ -346,6 +353,9 @@ async def _generate_chunk_audio(
     exaggeration: Optional[float],
     cfg_weight: Optional[float],
     temperature: Optional[float],
+    top_p: Optional[float],
+    min_p: Optional[float],
+    repetition_penalty: Optional[float],
 ) -> torch.Tensor:
     loop = asyncio.get_running_loop()
 
@@ -361,6 +371,9 @@ async def _generate_chunk_audio(
                         exaggeration=exaggeration,
                         cfg_weight=cfg_weight,
                         temperature=temperature,
+                        top_p=top_p,
+                        min_p=min_p,
+                        repetition_penalty=repetition_penalty,
                     )
                 ),
             )
@@ -385,6 +398,9 @@ async def _generate_full_audio(
     exaggeration: Optional[float],
     cfg_weight: Optional[float],
     temperature: Optional[float],
+    top_p: Optional[float],
+    min_p: Optional[float],
+    repetition_penalty: Optional[float],
 ) -> tuple[io.BytesIO, float]:
     _validate_text_length(text)
 
@@ -402,6 +418,9 @@ async def _generate_full_audio(
                     exaggeration=exaggeration,
                     cfg_weight=cfg_weight,
                     temperature=temperature,
+                    top_p=top_p,
+                    min_p=min_p,
+                    repetition_penalty=repetition_penalty,
                 )
             )
 
@@ -426,6 +445,9 @@ async def generate_speech_internal(
     exaggeration: Optional[float] = None,
     cfg_weight: Optional[float] = None,
     temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
+    min_p: Optional[float] = None,
+    repetition_penalty: Optional[float] = None,
 ) -> io.BytesIO:
     _validate_text_length(text, "audio")
     resolved_language = _validate_language_for_generation(language_id, "audio")
@@ -450,6 +472,9 @@ async def generate_speech_internal(
             exaggeration=exaggeration,
             cfg_weight=cfg_weight,
             temperature=temperature,
+            top_p=top_p,
+            min_p=min_p,
+            repetition_penalty=repetition_penalty,
         )
         observe_request_finished(
             "/v1/audio/speech",
@@ -497,6 +522,9 @@ async def generate_speech_sse(
     exaggeration: Optional[float] = None,
     cfg_weight: Optional[float] = None,
     temperature: Optional[float] = None,
+    top_p: Optional[float] = None,
+    min_p: Optional[float] = None,
+    repetition_penalty: Optional[float] = None,
     streaming_chunk_size: Optional[int] = None,
     streaming_strategy: Optional[str] = None,
     streaming_quality: Optional[str] = None,
@@ -535,6 +563,9 @@ async def generate_speech_sse(
                 exaggeration=exaggeration,
                 cfg_weight=cfg_weight,
                 temperature=temperature,
+                top_p=top_p,
+                min_p=min_p,
+                repetition_penalty=repetition_penalty,
             )
             await _guard_request_state(context, "chunk_emit")
             if not first_chunk_observed:
@@ -682,6 +713,9 @@ async def text_to_speech(request: TTSRequest, client_request: Request):
                 exaggeration=request.exaggeration,
                 cfg_weight=request.cfg_weight,
                 temperature=request.temperature,
+                top_p=request.top_p,
+                min_p=request.min_p,
+                repetition_penalty=request.repetition_penalty,
                 streaming_chunk_size=request.streaming_chunk_size,
                 streaming_strategy=request.streaming_strategy,
                 streaming_quality=request.streaming_quality,
@@ -717,6 +751,9 @@ async def text_to_speech(request: TTSRequest, client_request: Request):
             exaggeration=request.exaggeration,
             cfg_weight=request.cfg_weight,
             temperature=request.temperature,
+            top_p=request.top_p,
+            min_p=request.min_p,
+            repetition_penalty=request.repetition_penalty,
         )
         response = StreamingResponse(
             io.BytesIO(buffer.getvalue()),

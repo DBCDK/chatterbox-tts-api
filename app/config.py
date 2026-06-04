@@ -23,6 +23,9 @@ class Config:
     EXAGGERATION = float(os.getenv("EXAGGERATION", 0.5))
     CFG_WEIGHT = float(os.getenv("CFG_WEIGHT", 0.5))
     TEMPERATURE = float(os.getenv("TEMPERATURE", 0.8))
+    TOP_P = float(os.getenv("TOP_P", 0.95))
+    MIN_P = float(os.getenv("MIN_P", 0.05))
+    REPETITION_PENALTY = float(os.getenv("REPETITION_PENALTY", 2.0))
 
     # Text processing
     MIN_TEXT_LENGTH = int(os.getenv("MIN_TEXT_LENGTH", 2))
@@ -159,6 +162,18 @@ class Config:
         if not (0.05 <= cls.TEMPERATURE <= 5.0):
             raise ValueError(
                 f"TEMPERATURE must be between 0.05 and 5.0, got {cls.TEMPERATURE}"
+            )
+        if not (0.0 <= cls.TOP_P <= 1.0):
+            raise ValueError(
+                f"TOP_P must be between 0.0 and 1.0, got {cls.TOP_P}"
+            )
+        if not (0.0 <= cls.MIN_P <= 1.0):
+            raise ValueError(
+                f"MIN_P must be between 0.0 and 1.0, got {cls.MIN_P}"
+            )
+        if not (1.0 <= cls.REPETITION_PENALTY <= 2.0):
+            raise ValueError(
+                f"REPETITION_PENALTY must be between 1.0 and 2.0, got {cls.REPETITION_PENALTY}"
             )
         if cls.MIN_TEXT_LENGTH < 1:
             raise ValueError(
