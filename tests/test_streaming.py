@@ -12,8 +12,6 @@ class TestSpeechStreaming:
             json={
                 "input": TEST_TEXTS["medium"],
                 "stream_format": "sse",
-                "streaming_strategy": "sentence",
-                "streaming_chunk_size": 150,
             },
             stream=True,
             headers={"Accept": "text/event-stream"},

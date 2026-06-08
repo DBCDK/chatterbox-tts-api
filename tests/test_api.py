@@ -106,6 +106,6 @@ class TestValidation:
             json={"input": short_input},
         )
         assert response.status_code == 400
-        detail = response.json()["detail"]["error"]
+        detail = response.json()["error"]
         assert "too short" in detail["message"]
         assert detail["type"] == "invalid_request_error"

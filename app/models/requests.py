@@ -33,16 +33,14 @@ class TTSRequest(BaseModel):
     temperature: Optional[float] = Field(
         None, description="Sampling temperature", ge=0.05, le=5.0
     )
-
-    # Streaming-specific parameters
-    streaming_chunk_size: Optional[int] = Field(
-        None, description="Characters per streaming chunk", ge=50, le=500
+    top_p: Optional[float] = Field(
+        None, description="Nucleus sampling cutoff", gt=0.0, le=1.0
     )
-    streaming_strategy: Optional[str] = Field(
-        None, description="Chunking strategy for streaming"
+    min_p: Optional[float] = Field(
+        None, description="Minimum token probability floor", ge=0.0, lt=1.0
     )
-    streaming_quality: Optional[str] = Field(
-        None, description="Speed vs quality trade-off"
+    repetition_penalty: Optional[float] = Field(
+        None, description="Repetition penalty — 1.0 disables, >1.0 discourages repeats", ge=1.0
     )
 
     @validator("input")
@@ -58,25 +56,5 @@ class TTSRequest(BaseModel):
             if v not in allowed_formats:
                 raise ValueError(
                     f"stream_format must be one of: {', '.join(allowed_formats)}"
-                )
-        return v
-
-    @validator("streaming_strategy")
-    def validate_streaming_strategy(cls, v):
-        if v is not None:
-            allowed_strategies = ["sentence", "paragraph", "fixed", "word"]
-            if v not in allowed_strategies:
-                raise ValueError(
-                    f"streaming_strategy must be one of: {', '.join(allowed_strategies)}"
-                )
-        return v
-
-    @validator("streaming_quality")
-    def validate_streaming_quality(cls, v):
-        if v is not None:
-            allowed_qualities = ["fast", "balanced", "high"]
-            if v not in allowed_qualities:
-                raise ValueError(
-                    f"streaming_quality must be one of: {', '.join(allowed_qualities)}"
                 )
         return v

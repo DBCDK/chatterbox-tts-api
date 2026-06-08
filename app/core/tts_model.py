@@ -10,8 +10,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional
 
-from chatterbox.mtl_tts import ChatterboxMultilingualTTS
-from chatterbox.tts import ChatterboxTTS
+from chatterbox.inference import ChatterboxInference
 from huggingface_hub import snapshot_download
 
 from app.config import Config, detect_device
@@ -174,41 +173,42 @@ def _reset_runtime_state():
     )
 
 
-def _get_model_loader(model_class: str):
-    if model_class == "multilingual":
-        return ChatterboxMultilingualTTS
-    if model_class == "standard":
-        return ChatterboxTTS
-    raise ValueError(f"Unsupported MODEL_CLASS: {model_class}")
-
-
-def _resolve_supported_languages(model_source: str, model_class: str) -> Dict[str, str]:
+def _resolve_supported_languages(model_source: str, model_type: str) -> Dict[str, str]:
     configured_languages = Config.get_configured_supported_languages()
     if configured_languages:
         return configured_languages.copy()
-    if model_class == "multilingual" and model_source == "default":
+    if model_type == "multilingual" and model_source == "default":
         return SUPPORTED_LANGUAGES.copy()
     return {"en": "English"}
 
 
 def _load_model_sync(
-    model_source: str, model_class: str, device: str
+    model_source: str, model_type: str, device: str
 ) -> tuple[Any, Dict[str, Any]]:
     apply_chatterbox_patches()
-    loader = _get_model_loader(model_class)
+    language = Config.get_default_language()
     metadata: Dict[str, Any] = {
         "model_source": model_source,
-        "model_class": model_class,
-        "model_type": model_class,
+        "model_class": model_type,
+        "model_type": model_type,
         "model_repo_id": Config.MODEL_REPO_ID or None,
         "model_revision": Config.MODEL_REVISION,
         "model_local_path": Config.MODEL_LOCAL_PATH,
         "resolved_model_path": None,
-        "default_language": Config.get_default_language(),
+        "default_language": language,
     }
+    inference_kwargs = dict(
+        model_type=model_type,
+        language=language,
+        device=device,
+        normalize_text=Config.NORMALIZE_TEXT,
+        sentence_split=True,
+        inter_sentence_silence_ms=100,
+    )
 
     if model_source == "default":
-        model = loader.from_pretrained(device=device)
+        model = ChatterboxInference.from_pretrained(**inference_kwargs)
+        model.prepare_conditionals(Config.VOICE_SAMPLE_PATH)
         return model, metadata
 
     if model_source == "hf_repo":
@@ -220,14 +220,16 @@ def _load_model_sync(
             allow_patterns=Config.get_hf_allow_patterns(),
         )
         metadata["resolved_model_path"] = resolved_model_path
-        model = loader.from_local(resolved_model_path, device=device)
+        model = ChatterboxInference.from_local(ckpt_dir=resolved_model_path, **inference_kwargs)
+        model.prepare_conditionals(Config.VOICE_SAMPLE_PATH)
         return model, metadata
 
     if model_source == "local_dir":
         resolved_model_path = os.path.abspath(Config.MODEL_LOCAL_PATH)
         metadata["model_local_path"] = resolved_model_path
         metadata["resolved_model_path"] = resolved_model_path
-        model = loader.from_local(resolved_model_path, device=device)
+        model = ChatterboxInference.from_local(ckpt_dir=resolved_model_path, **inference_kwargs)
+        model.prepare_conditionals(Config.VOICE_SAMPLE_PATH)
         return model, metadata
 
     raise ValueError(f"Unsupported MODEL_SOURCE: {model_source}")
@@ -341,11 +343,11 @@ async def _reinitialize_slot(instance_id: int, reason: str) -> None:
 
             try:
                 model_source = Config.get_model_source()
-                model_class = Config.get_model_class()
+                model_type = Config.get_model_type()
                 new_model, _ = await loop.run_in_executor(
                     None,
-                    lambda ms=model_source, mc=model_class, dv=slot.device: (
-                        _load_model_sync(ms, mc, dv)
+                    lambda ms=model_source, mt=model_type, dv=slot.device: (
+                        _load_model_sync(ms, mt, dv)
                     ),
                 )
             except Exception as exc:
@@ -403,7 +405,7 @@ async def initialize_model():
         Config.validate()
         _device = detect_device()
         model_source = Config.get_model_source()
-        model_class = Config.get_model_class()
+        model_type = Config.get_model_type()
         default_language = Config.get_default_language()
 
         log_event(
@@ -414,7 +416,7 @@ async def initialize_model():
             voice_sample_path=Config.VOICE_SAMPLE_PATH,
             model_cache_dir=Config.MODEL_CACHE_DIR,
             model_source=model_source,
-            model_class=model_class,
+            model_type=model_type,
             configured_pool_size=Config.MODEL_INSTANCE_COUNT,
             model_repo_id=Config.MODEL_REPO_ID or None,
             model_local_path=Config.MODEL_LOCAL_PATH,
@@ -462,15 +464,15 @@ async def initialize_model():
                 model_instance_id=instance_id,
                 device=_device,
                 model_source=model_source,
-                model_class=model_class,
+                model_type=model_type,
                 configured_pool_size=Config.MODEL_INSTANCE_COUNT,
             )
             instance_started_at = loop.time()
             try:
                 model, model_metadata = await loop.run_in_executor(
                     None,
-                    lambda ms=model_source, mc=model_class, dv=_device: (
-                        _load_model_sync(ms, mc, dv)
+                    lambda ms=model_source, mt=model_type, dv=_device: (
+                        _load_model_sync(ms, mt, dv)
                     ),
                 )
             except Exception:
@@ -493,8 +495,8 @@ async def initialize_model():
         _available_model_ids = available_ids
         _reinit_lock = asyncio.Lock()
         _model = loaded_slots[0].model if loaded_slots else None
-        _is_multilingual = model_class == "multilingual"
-        _supported_languages = _resolve_supported_languages(model_source, model_class)
+        _is_multilingual = model_type == "multilingual"  # base and turbo treated as en-only
+        _supported_languages = _resolve_supported_languages(model_source, model_type)
         _model_metadata = {
             **(model_metadata or {}),
             "default_language": default_language,
@@ -714,7 +716,7 @@ def get_supported_languages():
         return _supported_languages.copy()
     return _resolve_supported_languages(
         Config.get_model_source(),
-        Config.get_model_class(),
+        Config.get_model_type(),
     )
 
 
@@ -729,37 +731,37 @@ def supports_language(language_id: str):
         return False
     supported_languages = get_supported_languages() or _resolve_supported_languages(
         Config.get_model_source(),
-        Config.get_model_class(),
+        Config.get_model_type(),
     )
     return language_id.lower() in supported_languages
 
 
 def get_model_info() -> Dict[str, Any]:
     """Get comprehensive model information."""
-    configured_model_class = (
-        _model_metadata.get("model_class") or Config.get_model_class()
+    configured_model_type = (
+        _model_metadata.get("model_type") or Config.get_model_type()
     )
     configured_supported_languages = (
         _supported_languages
         or _resolve_supported_languages(
             Config.get_model_source(),
-            configured_model_class,
+            configured_model_type,
         )
     )
     is_multilingual_model = (
         _is_multilingual
         if _is_multilingual is not None
-        else configured_model_class == "multilingual"
+        else configured_model_type == "multilingual"
     )
     resolved_metadata = {
         **_model_metadata,
         "model_source": _model_metadata.get("model_source")
         or Config.get_model_source(),
-        "model_class": configured_model_class,
+        "model_type": configured_model_type,
     }
 
     return {
-        "model_type": "multilingual" if is_multilingual_model else "standard",
+        "model_type": configured_model_type,
         "is_multilingual": is_multilingual_model,
         "supported_languages": configured_supported_languages,
         "language_count": len(configured_supported_languages),
