@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "chatterbox-tts-api"
 version = "2.1.0"
 description = "REST API for Chatterbox TTS with OpenAI compatibility"
-authors = [{ name = "DBC", email = "krje@dbc.dk" }]
+authors = [{ name = "DBC", email = "ai@dbc.dk" }]
 readme = "README.md"
 license = { text = "AGPLv3" }
 requires-python = ">=3.13"

@@ -1,20 +1,8 @@
-# GPU-capable Docker image for the Chatterbox TTS API service.
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+# Leaner GPU-capable Docker image for the Chatterbox TTS API service.
+FROM docker-dbc.artifacts.dbccloud.dk/dbc-python3
 
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y \
-    software-properties-common git curl build-essential ffmpeg libsndfile1 \
-    && add-apt-repository ppa:deadsnakes/ppa \
-    && apt-get update && apt-get install -y \
-    python3.13 python3.13-venv python3.13-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.13 1 && \
-    curl -LsSf https://astral.sh/uv/install.sh | sh -s -- --no-modify-path && \
-    mv /root/.local/bin/uv /usr/local/bin/uv
+RUN apt-get update && apt-get install -y ffmpeg git
 
 WORKDIR /app
 
@@ -30,7 +18,7 @@ ENV HOME=/home/appuser
 COPY --chown=appuser:appuser pyproject.toml uv.lock ./
 COPY --chown=appuser:appuser app/ ./app/
 COPY --chown=appuser:appuser main.py ./
-COPY --chown=appuser:appuser voice-sample.mp3 ./voice-sample.mp3
+COPY --chown=appuser:appuser coral_sample.wav ./voice-sample.wav
 
 USER appuser
 
@@ -41,7 +29,7 @@ ENV HOST=0.0.0.0
 ENV PORT=4123
 ENV DEVICE=cuda
 ENV CORS_ORIGINS=*
-ENV VOICE_SAMPLE_PATH=/app/voice-sample.mp3
+ENV VOICE_SAMPLE_PATH=/app/voice-sample.wav
 ENV MODEL_CACHE_DIR=/cache
 ENV MODEL_SOURCE=default
 ENV MODEL_TYPE=multilingual
@@ -52,6 +40,6 @@ ENV MAX_TOTAL_LENGTH=3000
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
-EXPOSE ${PORT}
+EXPOSE 4123
 
 CMD ["python", "main.py"]

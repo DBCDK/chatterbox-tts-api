@@ -44,7 +44,7 @@ instance/
 # Audio files (except sample)
 *.wav
 *.mp3
-!voice-sample.mp3
+!coral_sample.wav
 
 # Logs
 *.log
