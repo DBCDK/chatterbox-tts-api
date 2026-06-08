@@ -60,7 +60,6 @@ async def health_check():
         device=device or "unknown",
         config={
             "min_text_length": Config.MIN_TEXT_LENGTH,
-            "max_chunk_length": Config.MAX_CHUNK_LENGTH,
             "max_total_length": Config.MAX_TOTAL_LENGTH,
             "model_instance_count": Config.MODEL_INSTANCE_COUNT,
             "max_queue_wait_seconds": Config.MAX_QUEUE_WAIT_SECONDS,

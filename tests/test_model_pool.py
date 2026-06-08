@@ -21,15 +21,27 @@ class RecordingModel:
         self.generated_texts.append(kwargs["text"])
         return torch.zeros(1, 128)
 
+    async def generate_stream_async(self, **kwargs):
+        self.generated_texts.append(kwargs["text"])
+        yield torch.zeros(1, 128)
+
 
 class FailingModel(RecordingModel):
     def generate(self, **kwargs):
         raise RuntimeError(f"generation failed in {self.name}")
 
+    async def generate_stream_async(self, **kwargs):
+        raise RuntimeError(f"generation failed in {self.name}")
+        yield  # makes this an async generator
+
 
 class FatalFailingModel(RecordingModel):
     def generate(self, **kwargs):
         raise RuntimeError(f"CUDA error: device-side assert triggered in {self.name}")
+
+    async def generate_stream_async(self, **kwargs):
+        raise RuntimeError(f"CUDA error: device-side assert triggered in {self.name}")
+        yield  # makes this an async generator
 
 
 class FlakyModel(RecordingModel):
@@ -45,6 +57,13 @@ class FlakyModel(RecordingModel):
         if self._calls <= self._fail_count:
             raise RuntimeError(f"transient failure {self._calls} in {self.name}")
         return super().generate(**kwargs)
+
+    async def generate_stream_async(self, **kwargs):
+        self._calls += 1
+        if self._calls <= self._fail_count:
+            raise RuntimeError(f"transient failure {self._calls} in {self.name}")
+        self.generated_texts.append(kwargs["text"])
+        yield torch.zeros(1, 128)
 
 
 @pytest.fixture(autouse=True)
@@ -63,12 +82,12 @@ def check_api_health():
 def _configure_test_pool(monkeypatch, pool_size: int, model_factory=RecordingModel):
     model_ids = count()
 
-    def fake_load_model_sync(model_source: str, model_class: str, device: str):
+    def fake_load_model_sync(model_source: str, model_type: str, device: str):
         instance_id = next(model_ids)
         return model_factory(f"model-{instance_id}"), {
             "model_source": model_source,
-            "model_class": model_class,
-            "model_type": model_class,
+            "model_class": model_type,
+            "model_type": model_type,
             "model_repo_id": None,
             "model_revision": None,
             "model_local_path": None,
@@ -132,6 +151,9 @@ def test_request_failure_releases_healthy_lease(monkeypatch):
                 exaggeration=None,
                 cfg_weight=None,
                 temperature=None,
+                top_p=None,
+                min_p=None,
+                repetition_penalty=None,
             )
 
         await tts_model.release_model_lease(lease)
@@ -151,15 +173,20 @@ def test_non_fatal_error_keeps_slot_healthy(monkeypatch):
         await tts_model.initialize_model()
         lease = await tts_model.acquire_model_lease(0)
 
+        context = speech._new_request_context(mode="audio")
         with pytest.raises(RuntimeError, match="generation failed"):
-            await speech._generate_chunk_audio(
+            await speech._generate_full_audio(
+                context=context,
                 lease=lease,
-                chunk="hello",
+                text="hello",
                 voice_sample_path=Config.VOICE_SAMPLE_PATH,
                 language_id=None,
                 exaggeration=None,
                 cfg_weight=None,
                 temperature=None,
+                top_p=None,
+                min_p=None,
+                repetition_penalty=None,
             )
 
         await tts_model.release_model_lease(lease)
@@ -180,15 +207,20 @@ def test_fatal_error_retires_slot_immediately(monkeypatch):
         await tts_model.initialize_model()
         lease = await tts_model.acquire_model_lease(0)
 
+        context = speech._new_request_context(mode="audio")
         with pytest.raises(RuntimeError, match="CUDA error"):
-            await speech._generate_chunk_audio(
+            await speech._generate_full_audio(
+                context=context,
                 lease=lease,
-                chunk="hello",
+                text="hello",
                 voice_sample_path=Config.VOICE_SAMPLE_PATH,
                 language_id=None,
                 exaggeration=None,
                 cfg_weight=None,
                 temperature=None,
+                top_p=None,
+                min_p=None,
+                repetition_penalty=None,
             )
 
         await tts_model.release_model_lease(lease)
@@ -212,30 +244,40 @@ def test_non_fatal_errors_retire_slot_after_max_consecutive_failures(monkeypatch
 
         for i in range(max_failures - 1):
             lease = await tts_model.acquire_model_lease(0)
+            context = speech._new_request_context(mode="audio")
             with pytest.raises(RuntimeError):
-                await speech._generate_chunk_audio(
+                await speech._generate_full_audio(
+                    context=context,
                     lease=lease,
-                    chunk="hello",
+                    text="hello",
                     voice_sample_path=Config.VOICE_SAMPLE_PATH,
                     language_id=None,
                     exaggeration=None,
                     cfg_weight=None,
                     temperature=None,
+                    top_p=None,
+                    min_p=None,
+                    repetition_penalty=None,
                 )
             await tts_model.release_model_lease(lease)
             assert tts_model.is_ready() is True, f"slot retired too early after failure {i + 1}"
 
         # Final failure pushes the counter over the threshold
         lease = await tts_model.acquire_model_lease(0)
+        context = speech._new_request_context(mode="audio")
         with pytest.raises(RuntimeError):
-            await speech._generate_chunk_audio(
+            await speech._generate_full_audio(
+                context=context,
                 lease=lease,
-                chunk="hello",
+                text="hello",
                 voice_sample_path=Config.VOICE_SAMPLE_PATH,
                 language_id=None,
                 exaggeration=None,
                 cfg_weight=None,
                 temperature=None,
+                top_p=None,
+                min_p=None,
+                repetition_penalty=None,
             )
         await tts_model.release_model_lease(lease)
 
@@ -254,11 +296,7 @@ def test_successful_request_resets_failure_counter(monkeypatch):
         return FlakyModel(name, fail_count=fail_count)
 
     _configure_test_pool(monkeypatch, pool_size=1, model_factory=flaky_factory)
-    monkeypatch.setattr(
-        speech.ta,
-        "save",
-        lambda buffer, audio, sample_rate, format: buffer.write(b"wav"),
-    )
+    monkeypatch.setattr(speech.ta, "save", lambda buffer, audio, sr, format: buffer.write(b"wav"))
 
     async def scenario():
         await tts_model.initialize_model()
@@ -266,15 +304,20 @@ def test_successful_request_resets_failure_counter(monkeypatch):
         # Drive the slot up to MAX-1 failures
         for _ in range(fail_count):
             lease = await tts_model.acquire_model_lease(0)
+            context = speech._new_request_context(mode="audio")
             with pytest.raises(RuntimeError):
-                await speech._generate_chunk_audio(
+                await speech._generate_full_audio(
+                    context=context,
                     lease=lease,
-                    chunk="hello",
+                    text="hello",
                     voice_sample_path=Config.VOICE_SAMPLE_PATH,
                     language_id=None,
                     exaggeration=None,
                     cfg_weight=None,
                     temperature=None,
+                    top_p=None,
+                    min_p=None,
+                    repetition_penalty=None,
                 )
             await tts_model.release_model_lease(lease)
 
@@ -282,14 +325,19 @@ def test_successful_request_resets_failure_counter(monkeypatch):
 
         # One successful request resets the counter
         lease = await tts_model.acquire_model_lease(0)
-        await speech._generate_chunk_audio(
+        context = speech._new_request_context(mode="audio")
+        await speech._generate_full_audio(
+            context=context,
             lease=lease,
-            chunk="hello",
+            text="hello",
             voice_sample_path=Config.VOICE_SAMPLE_PATH,
             language_id=None,
             exaggeration=None,
             cfg_weight=None,
             temperature=None,
+            top_p=None,
+            min_p=None,
+            repetition_penalty=None,
         )
         await tts_model.release_model_lease(lease)
 
@@ -322,6 +370,9 @@ def test_non_streaming_request_keeps_one_stable_model(monkeypatch):
             exaggeration=None,
             cfg_weight=None,
             temperature=None,
+            top_p=None,
+            min_p=None,
+            repetition_penalty=None,
         )
 
         await tts_model.release_model_lease(lease)
@@ -331,7 +382,7 @@ def test_non_streaming_request_keeps_one_stable_model(monkeypatch):
 
         assert len(active_models) == 1
         assert active_models[0].name == f"model-{lease.instance_id}"
-        assert len(active_models[0].generated_texts) >= 2
+        assert len(active_models[0].generated_texts) >= 1
 
     asyncio.run(scenario())
 
@@ -354,9 +405,9 @@ def test_sse_request_keeps_one_stable_model(monkeypatch):
             exaggeration=None,
             cfg_weight=None,
             temperature=None,
-            streaming_chunk_size=20,
-            streaming_strategy="sentence",
-            streaming_quality="balanced",
+            top_p=None,
+            min_p=None,
+            repetition_penalty=None,
         ):
             events.append(event)
 
@@ -366,7 +417,7 @@ def test_sse_request_keeps_one_stable_model(monkeypatch):
         assert len(events) >= 3
         assert len(active_models) == 1
         assert active_models[0].name == f"model-{lease.instance_id}"
-        assert len(active_models[0].generated_texts) >= 2
+        assert len(active_models[0].generated_texts) >= 1
         assert tts_model.get_pool_status()["available_instances"] == 2
 
     asyncio.run(scenario())
@@ -405,11 +456,13 @@ def test_failed_slot_is_recovered(monkeypatch):
         await tts_model.initialize_model()
 
         lease = await tts_model.acquire_model_lease(0)
+        context = speech._new_request_context(mode="audio")
         with pytest.raises(RuntimeError, match="CUDA error"):
-            await speech._generate_chunk_audio(
-                lease=lease, chunk="hello",
+            await speech._generate_full_audio(
+                context=context, lease=lease, text="hello",
                 voice_sample_path=Config.VOICE_SAMPLE_PATH,
                 language_id=None, exaggeration=None, cfg_weight=None, temperature=None,
+                top_p=None, min_p=None, repetition_penalty=None,
             )
         await tts_model.release_model_lease(lease)
 
@@ -431,6 +484,7 @@ def test_slot_refreshes_after_request_threshold(monkeypatch):
     """After SLOT_REFRESH_AFTER_REQUESTS completions the slot is reloaded."""
     _configure_test_pool(monkeypatch, pool_size=1)
     monkeypatch.setattr(tts_model, "SLOT_REFRESH_AFTER_REQUESTS", 3)
+    monkeypatch.setattr(speech.ta, "save", lambda buffer, audio, sr, format: buffer.write(b"wav"))
 
     async def scenario():
         await tts_model.initialize_model()
@@ -438,10 +492,12 @@ def test_slot_refreshes_after_request_threshold(monkeypatch):
 
         for _ in range(3):
             lease = await tts_model.acquire_model_lease(0)
-            await speech._generate_chunk_audio(
-                lease=lease, chunk="hello",
+            context = speech._new_request_context(mode="audio")
+            await speech._generate_full_audio(
+                context=context, lease=lease, text="hello",
                 voice_sample_path=Config.VOICE_SAMPLE_PATH,
                 language_id=None, exaggeration=None, cfg_weight=None, temperature=None,
+                top_p=None, min_p=None, repetition_penalty=None,
             )
             await tts_model.release_model_lease(lease)
 
@@ -459,6 +515,7 @@ def test_refresh_deferred_while_lock_held(monkeypatch):
     """If the reinit lock is busy, the slot is returned to the pool instead of refreshed."""
     _configure_test_pool(monkeypatch, pool_size=1)
     monkeypatch.setattr(tts_model, "SLOT_REFRESH_AFTER_REQUESTS", 2)
+    monkeypatch.setattr(speech.ta, "save", lambda buffer, audio, sr, format: buffer.write(b"wav"))
 
     async def scenario():
         await tts_model.initialize_model()
@@ -468,10 +525,12 @@ def test_refresh_deferred_while_lock_held(monkeypatch):
         try:
             for _ in range(2):
                 lease = await tts_model.acquire_model_lease(0)
-                await speech._generate_chunk_audio(
-                    lease=lease, chunk="hello",
+                context = speech._new_request_context(mode="audio")
+                await speech._generate_full_audio(
+                    context=context, lease=lease, text="hello",
                     voice_sample_path=Config.VOICE_SAMPLE_PATH,
                     language_id=None, exaggeration=None, cfg_weight=None, temperature=None,
+                    top_p=None, min_p=None, repetition_penalty=None,
                 )
                 await tts_model.release_model_lease(lease)
 
@@ -502,11 +561,13 @@ def test_recovery_resets_pool_error_state(monkeypatch):
         await tts_model.initialize_model()
 
         lease = await tts_model.acquire_model_lease(0)
+        context = speech._new_request_context(mode="audio")
         with pytest.raises(RuntimeError):
-            await speech._generate_chunk_audio(
-                lease=lease, chunk="hello",
+            await speech._generate_full_audio(
+                context=context, lease=lease, text="hello",
                 voice_sample_path=Config.VOICE_SAMPLE_PATH,
                 language_id=None, exaggeration=None, cfg_weight=None, temperature=None,
+                top_p=None, min_p=None, repetition_penalty=None,
             )
         await tts_model.release_model_lease(lease)
 

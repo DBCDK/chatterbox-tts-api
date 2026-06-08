@@ -24,11 +24,22 @@ class RecordingModel:
         self.generated_texts.append(kwargs["text"])
         return torch.zeros(1, 128)
 
+    async def generate_stream_async(self, **kwargs):
+        self.generated_texts.append(kwargs["text"])
+        for _ in range(3):
+            yield torch.zeros(1, 128)
+
 
 class DelayedModel(RecordingModel):
     def generate(self, **kwargs):
-        time.sleep(0.03)
+        time.sleep(0.1)
         return super().generate(**kwargs)
+
+    async def generate_stream_async(self, **kwargs):
+        self.generated_texts.append(kwargs["text"])
+        for _ in range(10):
+            time.sleep(0.03)
+            yield torch.zeros(1, 128)
 
 
 class FakeRequest:
@@ -57,12 +68,12 @@ def check_api_health():
 def _configure_test_pool(monkeypatch, pool_size: int, model_factory=RecordingModel):
     model_ids = count()
 
-    def fake_load_model_sync(model_source: str, model_class: str, device: str):
+    def fake_load_model_sync(model_source: str, model_type: str, device: str):
         instance_id = next(model_ids)
         return model_factory(f"model-{instance_id}"), {
             "model_source": model_source,
-            "model_class": model_class,
-            "model_type": model_class,
+            "model_class": model_type,
+            "model_type": model_type,
             "model_repo_id": None,
             "model_revision": None,
             "model_local_path": None,
@@ -145,9 +156,9 @@ def test_sse_timeout_stops_before_done_and_keeps_model_healthy(monkeypatch):
             exaggeration=None,
             cfg_weight=None,
             temperature=None,
-            streaming_chunk_size=20,
-            streaming_strategy="sentence",
-            streaming_quality="balanced",
+            top_p=None,
+            min_p=None,
+            repetition_penalty=None,
         ):
             events.append(event)
 
@@ -182,9 +193,9 @@ def test_sse_disconnect_stops_scheduling_new_chunks(monkeypatch):
             exaggeration=None,
             cfg_weight=None,
             temperature=None,
-            streaming_chunk_size=20,
-            streaming_strategy="sentence",
-            streaming_quality="balanced",
+            top_p=None,
+            min_p=None,
+            repetition_penalty=None,
         ):
             events.append(event)
 
