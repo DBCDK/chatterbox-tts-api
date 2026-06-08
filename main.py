@@ -6,6 +6,13 @@ This is the main entry point for the application.
 It imports the FastAPI app from the organized app package.
 """
 
+# chatterbox/utils/splitter.py calls nltk.download() at import time, which
+# tries to fetch the NLTK index from the internet before checking local data.
+# This hangs indefinitely in network-restricted environments. punkt_tab is
+# pre-installed during the Docker build, so the network check is unnecessary.
+import nltk
+nltk.download = lambda *args, **kwargs: True
+
 import uvicorn
 from app.main import app
 from app.config import Config
