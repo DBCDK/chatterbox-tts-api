@@ -146,7 +146,6 @@ def test_request_failure_releases_healthy_lease(monkeypatch):
                 context=context,
                 lease=lease,
                 text="Sentence one. Sentence two.",
-                voice_sample_path=Config.VOICE_SAMPLE_PATH,
                 language_id=None,
                 exaggeration=None,
                 cfg_weight=None,
@@ -179,7 +178,6 @@ def test_non_fatal_error_keeps_slot_healthy(monkeypatch):
                 context=context,
                 lease=lease,
                 text="hello",
-                voice_sample_path=Config.VOICE_SAMPLE_PATH,
                 language_id=None,
                 exaggeration=None,
                 cfg_weight=None,
@@ -213,7 +211,6 @@ def test_fatal_error_retires_slot_immediately(monkeypatch):
                 context=context,
                 lease=lease,
                 text="hello",
-                voice_sample_path=Config.VOICE_SAMPLE_PATH,
                 language_id=None,
                 exaggeration=None,
                 cfg_weight=None,
@@ -250,7 +247,6 @@ def test_non_fatal_errors_retire_slot_after_max_consecutive_failures(monkeypatch
                     context=context,
                     lease=lease,
                     text="hello",
-                    voice_sample_path=Config.VOICE_SAMPLE_PATH,
                     language_id=None,
                     exaggeration=None,
                     cfg_weight=None,
@@ -270,7 +266,6 @@ def test_non_fatal_errors_retire_slot_after_max_consecutive_failures(monkeypatch
                 context=context,
                 lease=lease,
                 text="hello",
-                voice_sample_path=Config.VOICE_SAMPLE_PATH,
                 language_id=None,
                 exaggeration=None,
                 cfg_weight=None,
@@ -310,7 +305,6 @@ def test_successful_request_resets_failure_counter(monkeypatch):
                     context=context,
                     lease=lease,
                     text="hello",
-                    voice_sample_path=Config.VOICE_SAMPLE_PATH,
                     language_id=None,
                     exaggeration=None,
                     cfg_weight=None,
@@ -330,7 +324,6 @@ def test_successful_request_resets_failure_counter(monkeypatch):
             context=context,
             lease=lease,
             text="hello",
-            voice_sample_path=Config.VOICE_SAMPLE_PATH,
             language_id=None,
             exaggeration=None,
             cfg_weight=None,
@@ -365,7 +358,6 @@ def test_non_streaming_request_keeps_one_stable_model(monkeypatch):
             context=context,
             lease=lease,
             text=long_text,
-            voice_sample_path=Config.VOICE_SAMPLE_PATH,
             language_id=None,
             exaggeration=None,
             cfg_weight=None,
@@ -400,7 +392,6 @@ def test_sse_request_keeps_one_stable_model(monkeypatch):
             context=context,
             lease=lease,
             text="Sentence one. Sentence two. Sentence three.",
-            voice_sample_path=Config.VOICE_SAMPLE_PATH,
             language_id=None,
             exaggeration=None,
             cfg_weight=None,
@@ -460,7 +451,6 @@ def test_failed_slot_is_recovered(monkeypatch):
         with pytest.raises(RuntimeError, match="CUDA error"):
             await speech._generate_full_audio(
                 context=context, lease=lease, text="hello",
-                voice_sample_path=Config.VOICE_SAMPLE_PATH,
                 language_id=None, exaggeration=None, cfg_weight=None, temperature=None,
                 top_p=None, min_p=None, repetition_penalty=None,
             )
@@ -495,7 +485,6 @@ def test_slot_refreshes_after_request_threshold(monkeypatch):
             context = speech._new_request_context(mode="audio")
             await speech._generate_full_audio(
                 context=context, lease=lease, text="hello",
-                voice_sample_path=Config.VOICE_SAMPLE_PATH,
                 language_id=None, exaggeration=None, cfg_weight=None, temperature=None,
                 top_p=None, min_p=None, repetition_penalty=None,
             )
@@ -528,7 +517,6 @@ def test_refresh_deferred_while_lock_held(monkeypatch):
                 context = speech._new_request_context(mode="audio")
                 await speech._generate_full_audio(
                     context=context, lease=lease, text="hello",
-                    voice_sample_path=Config.VOICE_SAMPLE_PATH,
                     language_id=None, exaggeration=None, cfg_weight=None, temperature=None,
                     top_p=None, min_p=None, repetition_penalty=None,
                 )
@@ -565,7 +553,6 @@ def test_recovery_resets_pool_error_state(monkeypatch):
         with pytest.raises(RuntimeError):
             await speech._generate_full_audio(
                 context=context, lease=lease, text="hello",
-                voice_sample_path=Config.VOICE_SAMPLE_PATH,
                 language_id=None, exaggeration=None, cfg_weight=None, temperature=None,
                 top_p=None, min_p=None, repetition_penalty=None,
             )

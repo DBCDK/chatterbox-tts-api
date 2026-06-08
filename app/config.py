@@ -47,7 +47,6 @@ class Config:
     HF_TOKEN = (os.getenv("HF_TOKEN") or "").strip() or None
     HF_ALLOW_PATTERNS_RAW = (os.getenv("HF_ALLOW_PATTERNS") or "").strip()
     NORMALIZE_TEXT = os.getenv("NORMALIZE_TEXT", "true").lower() == "true"
-    USE_FAST_INFERENCE = os.getenv("USE_FAST_INFERENCE", "false").lower() == "true"
 
     # Generation parameters
     TOP_P = float(os.getenv("TOP_P", 1.0))

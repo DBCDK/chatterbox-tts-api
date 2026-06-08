@@ -197,16 +197,17 @@ def _load_model_sync(
         "resolved_model_path": None,
         "default_language": language,
     }
+    inference_kwargs = dict(
+        model_type=model_type,
+        language=language,
+        device=device,
+        normalize_text=Config.NORMALIZE_TEXT,
+        sentence_split=True,
+        inter_sentence_silence_ms=100,
+    )
 
     if model_source == "default":
-        model = ChatterboxInference.from_pretrained(
-            model_type=model_type,
-            language=language,
-            device=device,
-            normalize_text=Config.NORMALIZE_TEXT,
-            sentence_split=True,
-            inter_sentence_silence_ms=100,
-        )
+        model = ChatterboxInference.from_pretrained(**inference_kwargs)
         model.prepare_conditionals(Config.VOICE_SAMPLE_PATH)
         return model, metadata
 
@@ -219,15 +220,7 @@ def _load_model_sync(
             allow_patterns=Config.get_hf_allow_patterns(),
         )
         metadata["resolved_model_path"] = resolved_model_path
-        model = ChatterboxInference.from_local(
-            ckpt_dir=resolved_model_path,
-            model_type=model_type,
-            language=language,
-            device=device,
-            normalize_text=Config.NORMALIZE_TEXT,
-            sentence_split=True,
-            inter_sentence_silence_ms=100,
-        )
+        model = ChatterboxInference.from_local(ckpt_dir=resolved_model_path, **inference_kwargs)
         model.prepare_conditionals(Config.VOICE_SAMPLE_PATH)
         return model, metadata
 
@@ -235,15 +228,7 @@ def _load_model_sync(
         resolved_model_path = os.path.abspath(Config.MODEL_LOCAL_PATH)
         metadata["model_local_path"] = resolved_model_path
         metadata["resolved_model_path"] = resolved_model_path
-        model = ChatterboxInference.from_local(
-            ckpt_dir=resolved_model_path,
-            model_type=model_type,
-            language=language,
-            device=device,
-            normalize_text=Config.NORMALIZE_TEXT,
-            sentence_split=True,
-            inter_sentence_silence_ms=100,
-        )
+        model = ChatterboxInference.from_local(ckpt_dir=resolved_model_path, **inference_kwargs)
         model.prepare_conditionals(Config.VOICE_SAMPLE_PATH)
         return model, metadata
 
@@ -510,7 +495,7 @@ async def initialize_model():
         _available_model_ids = available_ids
         _reinit_lock = asyncio.Lock()
         _model = loaded_slots[0].model if loaded_slots else None
-        _is_multilingual = model_type == "multilingual"
+        _is_multilingual = model_type == "multilingual"  # base and turbo treated as en-only
         _supported_languages = _resolve_supported_languages(model_source, model_type)
         _model_metadata = {
             **(model_metadata or {}),

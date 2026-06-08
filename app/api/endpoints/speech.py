@@ -342,7 +342,6 @@ async def _generate_full_audio(
     context: RequestRuntimeContext,
     lease: ModelLease,
     text: str,
-    voice_sample_path: str,
     language_id: Optional[str],
     exaggeration: Optional[float],
     cfg_weight: Optional[float],
@@ -389,7 +388,6 @@ async def _generate_full_audio(
 
 async def generate_speech_internal(
     text: str,
-    voice_sample_path: str,
     language_id: Optional[str] = None,
     exaggeration: Optional[float] = None,
     cfg_weight: Optional[float] = None,
@@ -416,7 +414,6 @@ async def generate_speech_internal(
             context=context,
             lease=lease,
             text=text,
-            voice_sample_path=voice_sample_path,
             language_id=resolved_language,
             exaggeration=exaggeration,
             cfg_weight=cfg_weight,
@@ -465,7 +462,6 @@ async def generate_speech_sse(
     context: RequestRuntimeContext,
     lease: ModelLease,
     text: str,
-    voice_sample_path: str,
     language_id: Optional[str] = None,
     exaggeration: Optional[float] = None,
     cfg_weight: Optional[float] = None,
@@ -619,7 +615,7 @@ async def generate_speech_sse(
     description="Generate speech audio from input text. Use stream_format='sse' for streaming.",
 )
 async def text_to_speech(request: TTSRequest, client_request: Request):
-    voice_sample_path, language_id = resolve_voice_path_and_language(request.voice)
+    _, language_id = resolve_voice_path_and_language(request.voice)
     request_mode = request.stream_format or "audio"
     resolved_language = _validate_language_for_generation(language_id, request_mode)
     _validate_text_length(request.input, request_mode)
@@ -640,7 +636,6 @@ async def text_to_speech(request: TTSRequest, client_request: Request):
                 context=context,
                 lease=lease,
                 text=request.input,
-                voice_sample_path=voice_sample_path,
                 language_id=resolved_language,
                 exaggeration=request.exaggeration,
                 cfg_weight=request.cfg_weight,
@@ -675,7 +670,6 @@ async def text_to_speech(request: TTSRequest, client_request: Request):
             context=context,
             lease=lease,
             text=request.input,
-            voice_sample_path=voice_sample_path,
             language_id=resolved_language,
             exaggeration=request.exaggeration,
             cfg_weight=request.cfg_weight,

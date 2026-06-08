@@ -238,7 +238,6 @@ def test_sse_disconnect_updates_disconnect_metrics(monkeypatch):
             context=context,
             lease=lease,
             text="Sentence one. Sentence two. Sentence three.",
-            voice_sample_path=Config.VOICE_SAMPLE_PATH,
             language_id=None,
             exaggeration=None,
             cfg_weight=None,

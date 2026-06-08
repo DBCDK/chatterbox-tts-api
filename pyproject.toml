@@ -9,7 +9,7 @@ description = "REST API for Chatterbox TTS with OpenAI compatibility"
 authors = [{ name = "DBC", email = "krje@dbc.dk" }]
 readme = "README.md"
 license = { text = "AGPLv3" }
-requires-python = ">=3.13, <3.14"
+requires-python = ">=3.13"
 dependencies = [
   "coral-chatterbox @ git+https://github.com/alexandrainst/coral_chatterbox.git",
   "torch==2.7.1",
