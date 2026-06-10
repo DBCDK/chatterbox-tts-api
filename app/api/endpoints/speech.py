@@ -358,7 +358,7 @@ async def _generate_full_audio(
         with torch.no_grad():
             audio_tensor = await loop.run_in_executor(
                 None,
-                lambda: lease.model.generate(
+                lambda: lease.model.generate_fast(
                     **_generation_kwargs(
                         text=text,
                         language_id=language_id,
@@ -483,7 +483,7 @@ async def generate_speech_sse(
         total_frames = 0
         first_chunk_observed = False
 
-        async for audio_tensor in lease.model.generate_stream_async(
+        async for audio_tensor in lease.model.generate_stream_fast_async(
             **_generation_kwargs(
                 text=text,
                 language_id=language_id,
