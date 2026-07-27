@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Optional
 
+import torch
 from chatterbox.inference import ChatterboxInference
 from huggingface_hub import snapshot_download
 
@@ -192,7 +193,8 @@ def _resolve_supported_languages(model_source: str, model_type: str) -> Dict[str
 
 def _prepare_default_voice(model: Any, device: str) -> None:
     """Condition a freshly loaded model on the default voice and seed its cache entry."""
-    model.prepare_conditionals(Config.VOICE_SAMPLE_PATH)
+    with torch.no_grad():
+        model.prepare_conditionals(Config.VOICE_SAMPLE_PATH)
     model._active_voice_name = Config.DEFAULT_VOICE_NAME
     _voice_conditionals_cache.setdefault(
         (Config.DEFAULT_VOICE_NAME, device), copy.deepcopy(model.model.conds)
@@ -689,7 +691,8 @@ def apply_voice_to_lease(lease: "ModelLease", voice_name: str) -> None:
     cache_key = (resolved_name, lease.device)
     cached_conds = _voice_conditionals_cache.get(cache_key)
     if cached_conds is None:
-        lease.model.prepare_conditionals(library[resolved_name])
+        with torch.no_grad():
+            lease.model.prepare_conditionals(library[resolved_name])
         _voice_conditionals_cache[cache_key] = copy.deepcopy(lease.model.model.conds)
     else:
         lease.model.model.conds = copy.deepcopy(cached_conds)
