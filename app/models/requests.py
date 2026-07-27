@@ -11,8 +11,8 @@ class TTSRequest(BaseModel):
 
     input: str = Field(..., description="The text to generate audio for", min_length=1)
     voice: Optional[str] = Field(
-        "alloy",
-        description="Voice name, alias, or OpenAI-style voice name to resolve against the configured/default voice sample",
+        "mic",
+        description="Voice name to resolve against the configured voice library (DEFAULT_VOICE_NAME/VOICE_LIBRARY). Unknown names fall back to the default voice.",
     )
     response_format: Optional[str] = Field(
         "wav", description="Audio format (always returns WAV)"

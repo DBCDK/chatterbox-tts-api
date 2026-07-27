@@ -65,6 +65,8 @@ async def health_check():
             "max_queue_wait_seconds": Config.MAX_QUEUE_WAIT_SECONDS,
             "request_timeout_seconds": Config.REQUEST_TIMEOUT_SECONDS,
             "voice_sample_path": Config.VOICE_SAMPLE_PATH,
+            "default_voice_name": Config.DEFAULT_VOICE_NAME,
+            "voice_library": Config.get_voice_library(),
             "default_exaggeration": Config.EXAGGERATION,
             "default_cfg_weight": Config.CFG_WEIGHT,
             "default_temperature": Config.TEMPERATURE,

@@ -30,6 +30,7 @@ from app.core.tts_model import (
     ModelNotReadyError,
     ModelPoolExhaustedError,
     acquire_model_lease,
+    apply_voice_to_lease,
     get_default_language,
     is_fatal_generation_error,
     is_multilingual,
@@ -284,12 +285,21 @@ def _validate_text_length(text: str, mode: Optional[str] = None):
         )
 
 
-def resolve_voice_path_and_language(
+def resolve_voice_and_language(
     voice_name: Optional[str],
 ) -> tuple[str, Optional[str]]:
-    """Resolve request voice selection to the configured sample path."""
+    """Resolve a request's voice selection to a configured voice name and language.
+
+    Unknown voice names fall back to the configured default voice rather than
+    erroring, so existing OpenAI-style clients passing arbitrary voice names
+    keep working.
+    """
+    library = Config.get_voice_library()
+    resolved_name = (voice_name or "").strip().lower()
+    if resolved_name not in library:
+        resolved_name = Config.DEFAULT_VOICE_NAME
     default_language = get_default_language()
-    return Config.VOICE_SAMPLE_PATH, default_language if is_multilingual() else None
+    return resolved_name, default_language if is_multilingual() else None
 
 
 def _validate_language_for_generation(
@@ -349,28 +359,31 @@ async def _generate_full_audio(
     top_p: Optional[float],
     min_p: Optional[float],
     repetition_penalty: Optional[float],
+    voice_name: Optional[str] = None,
 ) -> tuple[io.BytesIO, float]:
     _validate_text_length(text)
     _raise_if_request_expired(context, "generation")
     loop = asyncio.get_running_loop()
 
+    def _generate():
+        if voice_name is not None:
+            apply_voice_to_lease(lease, voice_name)
+        return lease.model.generate(
+            **_generation_kwargs(
+                text=text,
+                language_id=language_id,
+                exaggeration=exaggeration,
+                cfg_weight=cfg_weight,
+                temperature=temperature,
+                top_p=top_p,
+                min_p=min_p,
+                repetition_penalty=repetition_penalty,
+            )
+        )
+
     try:
         with torch.no_grad():
-            audio_tensor = await loop.run_in_executor(
-                None,
-                lambda: lease.model.generate(
-                    **_generation_kwargs(
-                        text=text,
-                        language_id=language_id,
-                        exaggeration=exaggeration,
-                        cfg_weight=cfg_weight,
-                        temperature=temperature,
-                        top_p=top_p,
-                        min_p=min_p,
-                        repetition_penalty=repetition_penalty,
-                    )
-                ),
-            )
+            audio_tensor = await loop.run_in_executor(None, _generate)
     except Exception as exc:
         if is_fatal_generation_error(exc):
             lease.mark_broken(str(exc))
@@ -395,6 +408,7 @@ async def generate_speech_internal(
     top_p: Optional[float] = None,
     min_p: Optional[float] = None,
     repetition_penalty: Optional[float] = None,
+    voice_name: Optional[str] = None,
 ) -> io.BytesIO:
     _validate_text_length(text, "audio")
     resolved_language = _validate_language_for_generation(language_id, "audio")
@@ -421,6 +435,7 @@ async def generate_speech_internal(
             top_p=top_p,
             min_p=min_p,
             repetition_penalty=repetition_penalty,
+            voice_name=voice_name,
         )
         observe_request_finished(
             "/v1/audio/speech",
@@ -469,6 +484,7 @@ async def generate_speech_sse(
     top_p: Optional[float] = None,
     min_p: Optional[float] = None,
     repetition_penalty: Optional[float] = None,
+    voice_name: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     chunk_count = 0
     try:
@@ -479,6 +495,10 @@ async def generate_speech_sse(
             bits_per_sample=16,
         )
         yield f"data: {info_event.model_dump_json()}\n\n"
+
+        if voice_name is not None:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, apply_voice_to_lease, lease, voice_name)
 
         total_frames = 0
         first_chunk_observed = False
@@ -615,7 +635,7 @@ async def generate_speech_sse(
     description="Generate speech audio from input text. Use stream_format='sse' for streaming.",
 )
 async def text_to_speech(request: TTSRequest, client_request: Request):
-    _, language_id = resolve_voice_path_and_language(request.voice)
+    voice_name, language_id = resolve_voice_and_language(request.voice)
     request_mode = request.stream_format or "audio"
     resolved_language = _validate_language_for_generation(language_id, request_mode)
     _validate_text_length(request.input, request_mode)
@@ -643,6 +663,7 @@ async def text_to_speech(request: TTSRequest, client_request: Request):
                 top_p=request.top_p,
                 min_p=request.min_p,
                 repetition_penalty=request.repetition_penalty,
+                voice_name=voice_name,
             ),
             media_type="text/event-stream",
             headers={
@@ -677,6 +698,7 @@ async def text_to_speech(request: TTSRequest, client_request: Request):
             top_p=request.top_p,
             min_p=request.min_p,
             repetition_penalty=request.repetition_penalty,
+            voice_name=voice_name,
         )
         response = StreamingResponse(
             io.BytesIO(buffer.getvalue()),
@@ -762,5 +784,5 @@ __all__ = [
     "base_router",
     "generate_speech_internal",
     "generate_speech_sse",
-    "resolve_voice_path_and_language",
+    "resolve_voice_and_language",
 ]

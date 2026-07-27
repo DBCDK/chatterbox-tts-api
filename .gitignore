@@ -41,10 +41,12 @@ instance/
 .cache/
 .torch/
 
-# Audio files (except sample)
+# Audio files (except the tracked voice samples)
 *.wav
 *.mp3
-!coral_sample.wav
+!voices/
+!voices/mic-voice.wav
+!voices/nic-voice.wav
 
 # Logs
 *.log
@@ -89,8 +91,6 @@ temp/
 *.tmp 
 
 node_modules/
-
-voices/
 
 coverage.xml
 test_*

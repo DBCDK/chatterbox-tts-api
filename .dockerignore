@@ -77,7 +77,9 @@ temp/
 # Environment files (should be mounted or passed as env vars)
 .env.*
 
-# Large test files
+# Large test files (except the voice samples baked into the image)
 *.wav
 *.mp3
-!coral_sample.wav
+!voices/
+!voices/mic-voice.wav
+!voices/nic-voice.wav

@@ -3,6 +3,7 @@ TTS model initialization and pooled model management.
 """
 
 import asyncio
+import copy
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -47,6 +48,11 @@ _model_metadata: Dict[str, Any] = {
 _model_pool: list["ModelSlot"] = []
 _available_model_ids: Optional[asyncio.Queue[int]] = None
 _reinit_lock: Optional[asyncio.Lock] = None
+
+# Precomputed speaker conditionals, keyed by (voice_name, device). Populated
+# the first time a voice is used on a given device so repeat requests skip
+# re-encoding the reference audio.
+_voice_conditionals_cache: Dict[tuple, Any] = {}
 
 
 class InitializationState(Enum):
@@ -141,6 +147,7 @@ def _reset_runtime_state():
     global _model, _device, _initialization_state, _initialization_error
     global _initialization_progress, _is_multilingual, _supported_languages
     global _model_metadata, _model_pool, _available_model_ids, _reinit_lock
+    global _voice_conditionals_cache
 
     _model = None
     _device = None
@@ -162,6 +169,7 @@ def _reset_runtime_state():
     _model_pool = []
     _available_model_ids = None
     _reinit_lock = None
+    _voice_conditionals_cache = {}
     observe_pool_status(
         {
             "configured_instances": Config.MODEL_INSTANCE_COUNT,
@@ -180,6 +188,15 @@ def _resolve_supported_languages(model_source: str, model_type: str) -> Dict[str
     if model_type == "multilingual" and model_source == "default":
         return SUPPORTED_LANGUAGES.copy()
     return {"en": "English"}
+
+
+def _prepare_default_voice(model: Any, device: str) -> None:
+    """Condition a freshly loaded model on the default voice and seed its cache entry."""
+    model.prepare_conditionals(Config.VOICE_SAMPLE_PATH)
+    model._active_voice_name = Config.DEFAULT_VOICE_NAME
+    _voice_conditionals_cache.setdefault(
+        (Config.DEFAULT_VOICE_NAME, device), copy.deepcopy(model.model.conds)
+    )
 
 
 def _load_model_sync(
@@ -208,7 +225,7 @@ def _load_model_sync(
 
     if model_source == "default":
         model = ChatterboxInference.from_pretrained(**inference_kwargs)
-        model.prepare_conditionals(Config.VOICE_SAMPLE_PATH)
+        _prepare_default_voice(model, device)
         return model, metadata
 
     if model_source == "hf_repo":
@@ -221,7 +238,7 @@ def _load_model_sync(
         )
         metadata["resolved_model_path"] = resolved_model_path
         model = ChatterboxInference.from_local(ckpt_dir=resolved_model_path, **inference_kwargs)
-        model.prepare_conditionals(Config.VOICE_SAMPLE_PATH)
+        _prepare_default_voice(model, device)
         return model, metadata
 
     if model_source == "local_dir":
@@ -229,7 +246,7 @@ def _load_model_sync(
         metadata["model_local_path"] = resolved_model_path
         metadata["resolved_model_path"] = resolved_model_path
         model = ChatterboxInference.from_local(ckpt_dir=resolved_model_path, **inference_kwargs)
-        model.prepare_conditionals(Config.VOICE_SAMPLE_PATH)
+        _prepare_default_voice(model, device)
         return model, metadata
 
     raise ValueError(f"Unsupported MODEL_SOURCE: {model_source}")
@@ -425,11 +442,12 @@ async def initialize_model():
         _initialization_progress = "Creating model cache directory..."
         os.makedirs(Config.MODEL_CACHE_DIR, exist_ok=True)
 
-        _initialization_progress = "Checking voice sample..."
-        if not os.path.exists(Config.VOICE_SAMPLE_PATH):
-            raise FileNotFoundError(
-                f"Voice sample not found: {Config.VOICE_SAMPLE_PATH}"
-            )
+        _initialization_progress = "Checking voice samples..."
+        for voice_name, voice_path in Config.get_voice_library().items():
+            if not os.path.exists(voice_path):
+                raise FileNotFoundError(
+                    f"Voice sample not found for voice '{voice_name}': {voice_path}"
+                )
 
         if model_source == "local_dir" and not os.path.exists(Config.MODEL_LOCAL_PATH):
             raise FileNotFoundError(
@@ -649,6 +667,36 @@ async def leased_model(timeout_seconds: Optional[float] = None):
         await release_model_lease(lease)
 
 
+def apply_voice_to_lease(lease: "ModelLease", voice_name: str) -> None:
+    """Condition a leased model instance on the requested voice before generation.
+
+    Speaker conditionals are cached per (voice, device) after first use, so
+    switching voices costs a real encode only the first time a voice is used
+    on a given device — later switches just swap in the cached tensors.
+    Blocking (CPU/GPU work); call from a worker thread, not the event loop.
+    """
+    library = Config.get_voice_library()
+    resolved_name = (voice_name or "").strip().lower()
+    if resolved_name not in library:
+        resolved_name = Config.DEFAULT_VOICE_NAME
+
+    # A model with no recorded active voice was just (re)loaded, which always
+    # conditions it on the default voice — see `_prepare_default_voice`.
+    active_voice_name = getattr(lease.model, "_active_voice_name", Config.DEFAULT_VOICE_NAME)
+    if active_voice_name == resolved_name:
+        return
+
+    cache_key = (resolved_name, lease.device)
+    cached_conds = _voice_conditionals_cache.get(cache_key)
+    if cached_conds is None:
+        lease.model.prepare_conditionals(library[resolved_name])
+        _voice_conditionals_cache[cache_key] = copy.deepcopy(lease.model.model.conds)
+    else:
+        lease.model.model.conds = copy.deepcopy(cached_conds)
+
+    lease.model._active_voice_name = resolved_name
+
+
 def get_pool_status() -> Dict[str, Any]:
     """Return the current model pool state for health checks."""
     healthy_instances = _healthy_slot_count()
@@ -780,6 +828,7 @@ __all__ = [
     "ModelNotReadyError",
     "ModelPoolExhaustedError",
     "acquire_model_lease",
+    "apply_voice_to_lease",
     "get_default_language",
     "get_device",
     "get_initialization_error",
