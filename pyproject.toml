@@ -74,4 +74,5 @@ python_functions = ["test_*"]
 markers = [
   "api: marks tests as API tests",
   "streaming: marks tests as streaming integration tests",
+  "audio_quality: loads real model weights and runs real inference; slow, excluded by default",
 ]

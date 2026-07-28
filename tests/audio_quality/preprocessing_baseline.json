@@ -1,0 +1,210 @@
+[
+  {
+    "id": "short-01",
+    "input": "Solen skinner i dag.",
+    "normalized": "Solen skinner i dag.",
+    "sentences": [
+      "Solen skinner i dag."
+    ]
+  },
+  {
+    "id": "short-02",
+    "input": "Hunden løber hurtigt.",
+    "normalized": "Hunden løber hurtigt.",
+    "sentences": [
+      "Hunden løber hurtigt."
+    ]
+  },
+  {
+    "id": "char-01",
+    "input": "A",
+    "normalized": "A",
+    "sentences": [
+      "A"
+    ]
+  },
+  {
+    "id": "char-02",
+    "input": "Ja",
+    "normalized": "Ja",
+    "sentences": [
+      "Ja"
+    ]
+  },
+  {
+    "id": "lokalplan-01",
+    "input": "En lokalplan er en detaljeret fysisk plan for et geografisk område. Lokalplanen er bygget op af en redegørelsesdel og en vedtægtsdel. I redegørelsen beskrives planens intentioner og baggrund samt dens forhold til anden planlægning. I vedtægtsdelen fastlægges planområdets afgrænsning og anvendelse samt planens retsvirkninger. Der optages bestemmelser for udnyttelsen af den enkelte ejendom, herunder byggeriets omfang, udformning og udseende, adgangsforhold, friarealer og beplantning m.v. En lokalplan skal efter reglerne i planloven annonceres og fremlægges som forslag i mindst 8 uger. I denne periode har alle mulighed for at fremkomme med indsigelser og ændringsforslag til planen. Hvis planen ikke ændres væsentlig, kan den herefter vedtages endeligt af Byrådet. Ejendomme, der er omfattet af planen, må kun udstykkes, bebygges eller anvendes i overensstemmelse med planens bestemmelser. Den eksisterende lovlige anvendelse af en ejendom kan dog fortsætte som hidtil. Lokalplanen medfører heller ikke i sig selv pligt til at udføre de anlæg med videre, der er indeholdt i planen.",
+    "normalized": "En lokalplan er en detaljeret fysisk plan for et geografisk område. Lokalplanen er bygget op af en redegørelsesdel og en vedtægtsdel. I redegørelsen beskrives planens intentioner og baggrund samt dens forhold til anden planlægning. I vedtægtsdelen fastlægges planområdets afgrænsning og anvendelse samt planens retsvirkninger. Der optages bestemmelser for udnyttelsen af den enkelte ejendom, herunder byggeriets omfang, udformning og udseende, adgangsforhold, friarealer og beplantning m.v. En lokalplan skal efter reglerne i planloven annonceres og fremlægges som forslag i mindst otte uger. I denne periode har alle mulighed for at fremkomme med indsigelser og ændringsforslag til planen. Hvis planen ikke ændres væsentlig, kan den herefter vedtages endeligt af Byrådet. Ejendomme, der er omfattet af planen, må kun udstykkes, bebygges eller anvendes i overensstemmelse med planens bestemmelser. Den eksisterende lovlige anvendelse af en ejendom kan dog fortsætte som hidtil. Lokalplanen medfører heller ikke i sig selv pligt til at udføre de anlæg med videre, der er indeholdt i planen.",
+    "sentences": [
+      "En lokalplan er en detaljeret fysisk plan for et geografisk område.",
+      "Lokalplanen er bygget op af en redegørelsesdel og en vedtægtsdel.",
+      "I redegørelsen beskrives planens intentioner og baggrund samt dens forhold til anden planlægning.",
+      "I vedtægtsdelen fastlægges planområdets afgrænsning og anvendelse samt planens retsvirkninger.",
+      "Der optages bestemmelser for udnyttelsen af den enkelte ejendom, herunder byggeriets omfang, udformning og udseende, adgangsforhold, friarealer og beplantning m.v. En lokalplan skal efter reglerne i planloven annonceres og fremlægges som forslag i mindst otte uger.",
+      "I denne periode har alle mulighed for at fremkomme med indsigelser og ændringsforslag til planen.",
+      "Hvis planen ikke ændres væsentlig, kan den herefter vedtages endeligt af Byrådet.",
+      "Ejendomme, der er omfattet af planen, må kun udstykkes, bebygges eller anvendes i overensstemmelse med planens bestemmelser.",
+      "Den eksisterende lovlige anvendelse af en ejendom kan dog fortsætte som hidtil.",
+      "Lokalplanen medfører heller ikke i sig selv pligt til at udføre de anlæg med videre, der er indeholdt i planen."
+    ]
+  },
+  {
+    "id": "numeral-01",
+    "input": "Prisen for grunden er 1.000,50 kroner inklusive moms.",
+    "normalized": "Prisen for grunden er ettusind komma fem kroner inklusive moms.",
+    "sentences": [
+      "Prisen for grunden er ettusind komma fem kroner inklusive moms."
+    ]
+  },
+  {
+    "id": "numeral-02",
+    "input": "Pi er cirka 3,14, og det bruges i arealberegningen.",
+    "normalized": "Pi er cirka tre komma et fire, og det bruges i arealberegningen.",
+    "sentences": [
+      "Pi er cirka tre komma et fire, og det bruges i arealberegningen."
+    ]
+  },
+  {
+    "id": "numeral-03",
+    "input": "Lokalplanen forventes vedtaget i 2026.",
+    "normalized": "Lokalplanen forventes vedtaget i totusinde og seksogtyve.",
+    "sentences": [
+      "Lokalplanen forventes vedtaget i totusinde og seksogtyve."
+    ]
+  },
+  {
+    "id": "ordinal-01",
+    "input": "Fristen for indsigelser udløber den 1. januar.",
+    "normalized": "Fristen for indsigelser udløber den et. januar.",
+    "sentences": [
+      "Fristen for indsigelser udløber den et.",
+      "januar."
+    ]
+  },
+  {
+    "id": "ordinal-02",
+    "input": "Dette er beskrevet i 3. udgave af planloven.",
+    "normalized": "Dette er beskrevet i tre. udgave af planloven.",
+    "sentences": [
+      "Dette er beskrevet i tre.",
+      "udgave af planloven."
+    ]
+  },
+  {
+    "id": "abbrev-01",
+    "input": "Planen omfatter bl.a. friarealer og beplantning m.v.",
+    "normalized": "Planen omfatter bl.a. friarealer og beplantning m.v.",
+    "sentences": [
+      "Planen omfatter bl.a. friarealer og beplantning m.v."
+    ]
+  },
+  {
+    "id": "abbrev-02",
+    "input": "Se f.eks. afsnit 2, eller ca. side 10 for detaljer.",
+    "normalized": "Se f.eks. afsnit to, eller ca. side ti for detaljer.",
+    "sentences": [
+      "Se f.eks. afsnit to, eller ca. side ti for detaljer."
+    ]
+  },
+  {
+    "id": "abbrev-03",
+    "input": "Vedtægtsdelen gælder for hele området, jf. planlovens bestemmelser.",
+    "normalized": "Vedtægtsdelen gælder for hele området, jf. planlovens bestemmelser.",
+    "sentences": [
+      "Vedtægtsdelen gælder for hele området, jf. planlovens bestemmelser."
+    ]
+  },
+  {
+    "id": "aeoa-01",
+    "input": "Æbletræet står i gården, ligesom Ørnen fløj over Åen.",
+    "normalized": "Æbletræet står i gården, ligesom Ørnen fløj over Åen.",
+    "sentences": [
+      "Æbletræet står i gården, ligesom Ørnen fløj over Åen."
+    ]
+  },
+  {
+    "id": "aeoa-02",
+    "input": "ÆØÅ og æøå forekommer i ord som Åse, Østerbro og Ærø.",
+    "normalized": "ÆØÅ og æøå forekommer i ord som Åse, Østerbro og Ærø.",
+    "sentences": [
+      "ÆØÅ og æøå forekommer i ord som Åse, Østerbro og Ærø."
+    ]
+  },
+  {
+    "id": "maxlen-01",
+    "input": "En lokalplan er en detaljeret fysisk plan for et geografisk område. Lokalplanen er bygget op af en redegørelsesdel og en vedtægtsdel. I redegørelsen beskrives planens intentioner og baggrund samt dens forhold til anden planlægning. I vedtægtsdelen fastlægges planområdets afgrænsning og anvendelse samt planens retsvirkninger. Der optages bestemmelser for udnyttelsen af den enkelte ejendom, herunder byggeriets omfang, udformning og udseende, adgangsforhold, friarealer og beplantning m.v. En lokalplan skal efter reglerne i planloven annonceres og fremlægges som forslag i mindst 8 uger. I denne periode har alle mulighed for at fremkomme med indsigelser og ændringsforslag til planen. Hvis planen ikke ændres væsentlig, kan den herefter vedtages endeligt af Byrådet. Ejendomme, der er omfattet af planen, må kun udstykkes, bebygges eller anvendes i overensstemmelse med planens bestemmelser. Den eksisterende lovlige anvendelse af en ejendom kan dog fortsætte som hidtil. Lokalplanen medfører heller ikke i sig selv pligt til at udføre de anlæg med videre, der er indeholdt i planen.Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold. Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen. Planen indeholder bestemmelser om bebyggelsens omfang, herunder max. etageareal og bygningshøjde. Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen. Bevaringsværdige bygninger og beplantning kan sikres med særlige bestemmelser. Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold. Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen. Planen indeholder bestemmelser om bebyggelsens omfang, herunder max. etageareal og bygningshøjde. Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen. Bevaringsværdige bygninger og beplantning kan sikres med særlige bestemmelser. Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold. Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen. Planen indeholder bestemmelser om bebyggelsens omfang, herunder max. etageareal og bygningshøjde. Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen. Bevaringsværdige bygninger og beplantning kan sikres med særlige bestemmelser. Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold. Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen. Planen indeholder bestemmelser om bebyggelsens omfang, herunder max. etageareal og bygningshøjde. Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen. Bevaringsværdige bygninger og beplantning kan sikres med særlige bestemmelser. Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold. Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen. Planen indeholder bestemmelser om bebyggelsens omfang, herunder max. etageareal og bygningshøjde. Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen.",
+    "normalized": "En lokalplan er en detaljeret fysisk plan for et geografisk område. Lokalplanen er bygget op af en redegørelsesdel og en vedtægtsdel. I redegørelsen beskrives planens intentioner og baggrund samt dens forhold til anden planlægning. I vedtægtsdelen fastlægges planområdets afgrænsning og anvendelse samt planens retsvirkninger. Der optages bestemmelser for udnyttelsen af den enkelte ejendom, herunder byggeriets omfang, udformning og udseende, adgangsforhold, friarealer og beplantning m.v. En lokalplan skal efter reglerne i planloven annonceres og fremlægges som forslag i mindst otte uger. I denne periode har alle mulighed for at fremkomme med indsigelser og ændringsforslag til planen. Hvis planen ikke ændres væsentlig, kan den herefter vedtages endeligt af Byrådet. Ejendomme, der er omfattet af planen, må kun udstykkes, bebygges eller anvendes i overensstemmelse med planens bestemmelser. Den eksisterende lovlige anvendelse af en ejendom kan dog fortsætte som hidtil. Lokalplanen medfører heller ikke i sig selv pligt til at udføre de anlæg med videre, der er indeholdt i planen.Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold. Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen. Planen indeholder bestemmelser om bebyggelsens omfang, herunder max. etageareal og bygningshøjde. Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen. Bevaringsværdige bygninger og beplantning kan sikres med særlige bestemmelser. Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold. Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen. Planen indeholder bestemmelser om bebyggelsens omfang, herunder max. etageareal og bygningshøjde. Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen. Bevaringsværdige bygninger og beplantning kan sikres med særlige bestemmelser. Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold. Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen. Planen indeholder bestemmelser om bebyggelsens omfang, herunder max. etageareal og bygningshøjde. Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen. Bevaringsværdige bygninger og beplantning kan sikres med særlige bestemmelser. Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold. Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen. Planen indeholder bestemmelser om bebyggelsens omfang, herunder max. etageareal og bygningshøjde. Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen. Bevaringsværdige bygninger og beplantning kan sikres med særlige bestemmelser. Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold. Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen. Planen indeholder bestemmelser om bebyggelsens omfang, herunder max. etageareal og bygningshøjde. Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen.",
+    "sentences": [
+      "En lokalplan er en detaljeret fysisk plan for et geografisk område.",
+      "Lokalplanen er bygget op af en redegørelsesdel og en vedtægtsdel.",
+      "I redegørelsen beskrives planens intentioner og baggrund samt dens forhold til anden planlægning.",
+      "I vedtægtsdelen fastlægges planområdets afgrænsning og anvendelse samt planens retsvirkninger.",
+      "Der optages bestemmelser for udnyttelsen af den enkelte ejendom, herunder byggeriets omfang, udformning og udseende, adgangsforhold, friarealer og beplantning m.v. En lokalplan skal efter reglerne i planloven annonceres og fremlægges som forslag i mindst otte uger.",
+      "I denne periode har alle mulighed for at fremkomme med indsigelser og ændringsforslag til planen.",
+      "Hvis planen ikke ændres væsentlig, kan den herefter vedtages endeligt af Byrådet.",
+      "Ejendomme, der er omfattet af planen, må kun udstykkes, bebygges eller anvendes i overensstemmelse med planens bestemmelser.",
+      "Den eksisterende lovlige anvendelse af en ejendom kan dog fortsætte som hidtil.",
+      "Lokalplanen medfører heller ikke i sig selv pligt til at udføre de anlæg med videre, der er indeholdt i planen.Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold.",
+      "Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen.",
+      "Planen indeholder bestemmelser om bebyggelsens omfang, herunder max.",
+      "etageareal og bygningshøjde.",
+      "Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen.",
+      "Bevaringsværdige bygninger og beplantning kan sikres med særlige bestemmelser.",
+      "Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold.",
+      "Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen.",
+      "Planen indeholder bestemmelser om bebyggelsens omfang, herunder max.",
+      "etageareal og bygningshøjde.",
+      "Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen.",
+      "Bevaringsværdige bygninger og beplantning kan sikres med særlige bestemmelser.",
+      "Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold.",
+      "Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen.",
+      "Planen indeholder bestemmelser om bebyggelsens omfang, herunder max.",
+      "etageareal og bygningshøjde.",
+      "Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen.",
+      "Bevaringsværdige bygninger og beplantning kan sikres med særlige bestemmelser.",
+      "Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold.",
+      "Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen.",
+      "Planen indeholder bestemmelser om bebyggelsens omfang, herunder max.",
+      "etageareal og bygningshøjde.",
+      "Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen.",
+      "Bevaringsværdige bygninger og beplantning kan sikres med særlige bestemmelser.",
+      "Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold.",
+      "Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen.",
+      "Planen indeholder bestemmelser om bebyggelsens omfang, herunder max.",
+      "etageareal og bygningshøjde.",
+      "Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen."
+    ]
+  },
+  {
+    "id": "emdash-01",
+    "input": "Mødet starter klokken ti -- husk at medbringe underskrevne papirer.",
+    "normalized": "Mødet starter klokken ti",
+    "sentences": [
+      "Mødet starter klokken ti"
+    ]
+  },
+  {
+    "id": "emdash-02",
+    "input": "Planen blev godkendt --- se bilag 3 for det fulde referat.",
+    "normalized": "Planen blev godkendt",
+    "sentences": [
+      "Planen blev godkendt"
+    ]
+  },
+  {
+    "id": "mixed-01",
+    "input": "Vi har et vigtigt meeting i morgen, please join on time.",
+    "normalized": "Vi har et vigtigt meeting i morgen, please join on time.",
+    "sentences": [
+      "Vi har et vigtigt meeting i morgen, please join on time."
+    ]
+  },
+  {
+    "id": "mixed-02",
+    "input": "The lokalplan gælder for hele området, no exceptions apply.",
+    "normalized": "The lokalplan gælder for hele området, no exceptions apply.",
+    "sentences": [
+      "The lokalplan gælder for hele området, no exceptions apply."
+    ]
+  }
+]

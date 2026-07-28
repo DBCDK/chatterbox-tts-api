@@ -1,0 +1,122 @@
+[
+  {
+    "id": "short-01",
+    "text": "Solen skinner i dag.",
+    "category": "short_single_sentence",
+    "why": "Fastest signal; smallest diff surface for catching gross regressions quickly."
+  },
+  {
+    "id": "short-02",
+    "text": "Hunden løber hurtigt.",
+    "category": "short_single_sentence",
+    "why": "Second short-sentence sample for variety in the fast-signal tier."
+  },
+  {
+    "id": "char-01",
+    "text": "A",
+    "category": "single_or_two_char",
+    "why": "Exercises the AlignmentStreamAnalyzer IndexError guard patched in app/core/chatterbox_patches.py. Note: the deployed API rejects this with HTTP 400 (MIN_TEXT_LENGTH=2), so it only exercises the guard via a direct model call (as in Deliverable 2's snapshot), not through the HTTP endpoint."
+  },
+  {
+    "id": "char-02",
+    "text": "Ja",
+    "category": "single_or_two_char",
+    "why": "Two-character input; same IndexError guard at a slightly different boundary condition."
+  },
+  {
+    "id": "lokalplan-01",
+    "text": "En lokalplan er en detaljeret fysisk plan for et geografisk område. Lokalplanen er bygget op af en redegørelsesdel og en vedtægtsdel. I redegørelsen beskrives planens intentioner og baggrund samt dens forhold til anden planlægning. I vedtægtsdelen fastlægges planområdets afgrænsning og anvendelse samt planens retsvirkninger. Der optages bestemmelser for udnyttelsen af den enkelte ejendom, herunder byggeriets omfang, udformning og udseende, adgangsforhold, friarealer og beplantning m.v. En lokalplan skal efter reglerne i planloven annonceres og fremlægges som forslag i mindst 8 uger. I denne periode har alle mulighed for at fremkomme med indsigelser og ændringsforslag til planen. Hvis planen ikke ændres væsentlig, kan den herefter vedtages endeligt af Byrådet. Ejendomme, der er omfattet af planen, må kun udstykkes, bebygges eller anvendes i overensstemmelse med planens bestemmelser. Den eksisterende lovlige anvendelse af en ejendom kan dog fortsætte som hidtil. Lokalplanen medfører heller ikke i sig selv pligt til at udføre de anlæg med videre, der er indeholdt i planen.",
+    "category": "lokalplan_production_text",
+    "why": "Real production workload; ~1200 chars, ~11 sentences. Source: tests/tts_presure_test.sh (default INPUT_TEXT)."
+  },
+  {
+    "id": "numeral-01",
+    "text": "Prisen for grunden er 1.000,50 kroner inklusive moms.",
+    "category": "danish_numerals",
+    "why": "Period-as-thousands-separator and comma-as-decimal is the exact case the normalizer exists for."
+  },
+  {
+    "id": "numeral-02",
+    "text": "Pi er cirka 3,14, og det bruges i arealberegningen.",
+    "category": "danish_numerals",
+    "why": "Comma-as-decimal-separator without a thousands group, a simpler variant of numeral-01."
+  },
+  {
+    "id": "numeral-03",
+    "text": "Lokalplanen forventes vedtaget i 2026.",
+    "category": "danish_numerals",
+    "why": "A bare four-digit year, which must not be misread as a thousands-separated number."
+  },
+  {
+    "id": "ordinal-01",
+    "text": "Fristen for indsigelser udløber den 1. januar.",
+    "category": "ordinals_and_dates",
+    "why": "Abbreviation-vs-sentence-boundary ambiguity for the splitter: '1.' is an ordinal, not a sentence end."
+  },
+  {
+    "id": "ordinal-02",
+    "text": "Dette er beskrevet i 3. udgave af planloven.",
+    "category": "ordinals_and_dates",
+    "why": "Ordinal mid-sentence immediately followed by a lowercase word; a common punkt false-split trigger."
+  },
+  {
+    "id": "abbrev-01",
+    "text": "Planen omfatter bl.a. friarealer og beplantning m.v.",
+    "category": "danish_abbreviations",
+    "why": "bl.a. and m.v. each contain a period that is not a sentence end; the doc's own canonical example."
+  },
+  {
+    "id": "abbrev-02",
+    "text": "Se f.eks. afsnit 2, eller ca. side 10 for detaljer.",
+    "category": "danish_abbreviations",
+    "why": "f.eks. mid-sentence is precisely where NLTK punkt gets it wrong; highest-value corpus entry."
+  },
+  {
+    "id": "abbrev-03",
+    "text": "Vedtægtsdelen gælder for hele området, jf. planlovens bestemmelser.",
+    "category": "danish_abbreviations",
+    "why": "jf. is a third common Danish abbreviation not covered by abbrev-01/02, mid-sentence."
+  },
+  {
+    "id": "aeoa-01",
+    "text": "Æbletræet står i gården, ligesom Ørnen fløj over Åen.",
+    "category": "aeoa_and_casing",
+    "why": "Æ/Ø/Å in both upper- and lower-case at word-initial position; tokenizer coverage."
+  },
+  {
+    "id": "aeoa-02",
+    "text": "ÆØÅ og æøå forekommer i ord som Åse, Østerbro og Ærø.",
+    "category": "aeoa_and_casing",
+    "why": "All-caps and all-lowercase diacritic runs plus mixed-case proper nouns."
+  },
+  {
+    "id": "maxlen-01",
+    "text": "En lokalplan er en detaljeret fysisk plan for et geografisk område. Lokalplanen er bygget op af en redegørelsesdel og en vedtægtsdel. I redegørelsen beskrives planens intentioner og baggrund samt dens forhold til anden planlægning. I vedtægtsdelen fastlægges planområdets afgrænsning og anvendelse samt planens retsvirkninger. Der optages bestemmelser for udnyttelsen af den enkelte ejendom, herunder byggeriets omfang, udformning og udseende, adgangsforhold, friarealer og beplantning m.v. En lokalplan skal efter reglerne i planloven annonceres og fremlægges som forslag i mindst 8 uger. I denne periode har alle mulighed for at fremkomme med indsigelser og ændringsforslag til planen. Hvis planen ikke ændres væsentlig, kan den herefter vedtages endeligt af Byrådet. Ejendomme, der er omfattet af planen, må kun udstykkes, bebygges eller anvendes i overensstemmelse med planens bestemmelser. Den eksisterende lovlige anvendelse af en ejendom kan dog fortsætte som hidtil. Lokalplanen medfører heller ikke i sig selv pligt til at udføre de anlæg med videre, der er indeholdt i planen.Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold. Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen. Planen indeholder bestemmelser om bebyggelsens omfang, herunder max. etageareal og bygningshøjde. Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen. Bevaringsværdige bygninger og beplantning kan sikres med særlige bestemmelser. Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold. Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen. Planen indeholder bestemmelser om bebyggelsens omfang, herunder max. etageareal og bygningshøjde. Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen. Bevaringsværdige bygninger og beplantning kan sikres med særlige bestemmelser. Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold. Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen. Planen indeholder bestemmelser om bebyggelsens omfang, herunder max. etageareal og bygningshøjde. Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen. Bevaringsværdige bygninger og beplantning kan sikres med særlige bestemmelser. Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold. Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen. Planen indeholder bestemmelser om bebyggelsens omfang, herunder max. etageareal og bygningshøjde. Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen. Bevaringsværdige bygninger og beplantning kan sikres med særlige bestemmelser. Kommuneplanen fastlægger de overordnede rammer for lokalplanens indhold. Naboorientering gennemføres, hvis planen fraviger væsentligt fra kommuneplanen. Planen indeholder bestemmelser om bebyggelsens omfang, herunder max. etageareal og bygningshøjde. Vejadgang, parkering og stiforbindelser fastlægges i vedtægtsdelen.",
+    "category": "max_total_length",
+    "why": "Upper-bound behaviour at Config.MAX_TOTAL_LENGTH=3000 chars; this entry is 2996 chars."
+  },
+  {
+    "id": "emdash-01",
+    "text": "Mødet starter klokken ti -- husk at medbringe underskrevne papirer.",
+    "category": "emdash_trailing_content",
+    "why": "The normalizer strips \\s*-{2,}.*$; verify the strip only removes the trailing clause, not the whole sentence."
+  },
+  {
+    "id": "emdash-02",
+    "text": "Planen blev godkendt --- se bilag 3 for det fulde referat.",
+    "category": "emdash_trailing_content",
+    "why": "Three-dash variant of the em-dash-strip case, to confirm the regex threshold ({2,}) behaves the same."
+  },
+  {
+    "id": "mixed-01",
+    "text": "Vi har et vigtigt meeting i morgen, please join on time.",
+    "category": "mixed_danish_english",
+    "why": "The deployed model is configured da,en; a Danish carrier sentence with an English clause."
+  },
+  {
+    "id": "mixed-02",
+    "text": "The lokalplan gælder for hele området, no exceptions apply.",
+    "category": "mixed_danish_english",
+    "why": "English carrier sentence with an embedded Danish noun phrase, the inverse of mixed-01."
+  }
+]

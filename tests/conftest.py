@@ -56,9 +56,16 @@ def api_client() -> APIClient:
     return APIClient()
 
 
-@pytest.fixture(scope="session", autouse=True)
-def check_api_health(api_client: APIClient):
-    if not api_client.wait_for_health():
+@pytest.fixture(scope="session")
+def _api_health_ok(api_client: APIClient) -> bool:
+    return api_client.wait_for_health()
+
+
+@pytest.fixture(autouse=True)
+def check_api_health(request):
+    if request.node.get_closest_marker("api") is None:
+        return
+    if not request.getfixturevalue("_api_health_ok"):
         pytest.skip(f"API not available at {BASE_URL}. Please start the server first.")
 
 
