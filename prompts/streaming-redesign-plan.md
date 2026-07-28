@@ -1,9 +1,15 @@
 # Streaming Redesign And Upstream Migration Plan
 
-Status: **all questions resolved.** Phase 0 and Phase 1 have detailed plans of their own:
+Status: **all questions resolved.** Each in-repo phase has a detailed plan of its own:
 
 - `prompts/streaming-phase-0-plan.md` — baseline measurements and regression harness
 - `prompts/streaming-phase-1-plan.md` — wire protocol, framing, sample-format standardization
+- `prompts/streaming-phase-2-plan.md` — migrate off the archived coral fork
+- `prompts/streaming-phase-3-plan.md` — token-level streaming
+
+Phase 4 (glyph-gate adapter and metering) is **not** planned here — it changes a different service.
+Its in-repo documentation work has been folded into Phases 1–3. See *Phase 4* below for what still
+needs doing and by whom.
 
 This document remains the source of truth for cross-phase decisions and rationale.
 
@@ -228,10 +234,43 @@ added for a non-cluster consumer.
 - WebSocket or WebRTC transports. Neither is justified by the request/response usage pattern.
 - A job-and-resource API (`POST` returns id, `GET` streams). Revisit only if retry/resume becomes a
   requirement.
-- Multi-voice or voice cloning per request. `resolve_voice_path_and_language` stays as-is.
+- Voice cloning from a per-request uploaded reference. Multi-voice selection from a configured library
+  is **already being added** on `feature/multi-voice-support` — see *Multi-Voice Interaction* below.
 - Raising `MAX_TOTAL_LENGTH`. Separate decision, separate risk.
 - Changing the model pool's lease semantics. Explicitly rejected in favour of token-level streaming.
 - **CUDA graph acceleration.** See *Tried And Rejected*.
+
+## Multi-Voice Interaction
+
+Multi-voice support is in review on `feature/multi-voice-support` and is expected to land before this
+work starts. **All phase plans assume it has landed.** What it establishes:
+
+- `Config.get_voice_library()` returns `{voice_name: reference_path}`, populated from a `VOICE_LIBRARY`
+  JSON environment variable plus `DEFAULT_VOICE_NAME` / `VOICE_SAMPLE_PATH`.
+- `_voice_conditionals_cache` in `app/core/tts_model.py` caches speaker conditionals keyed by
+  **`(voice_name, device)`** — module-level, therefore shared across all pool instances rather than
+  duplicated per instance. Cache size scales with the number of voices, not voices x instances.
+- `apply_voice_to_lease(lease, voice_name)` hot-swaps conditionals onto a leased instance: no-op if
+  already active, restore from cache if present, otherwise encode and cache. Blocking work, so it runs
+  in a worker thread.
+- `resolve_voice_path_and_language` becomes `resolve_voice_and_language` and returns a **voice name**
+  rather than a path. Unknown names fall back to the default rather than erroring, preserving
+  compatibility with OpenAI-style clients that send arbitrary voice names.
+
+Three consequences for this work:
+
+1. **Voice application belongs in shared setup.** The multi-voice branch applies the voice in two
+   places — inside the executor for non-streaming, and once before the generator for SSE. Phase 1
+   collapses the paths, so it should apply once in shared setup after lease acquisition, matching the
+   SSE pattern.
+2. **Never re-apply per chunk.** The SSE path already gets this right. Phase 3 increases chunk count
+   several-fold, and re-conditioning per chunk would be both a large latency regression and a
+   correctness risk mid-utterance.
+3. **`_last_audio_prompt_path` must go.** The fork's wrapper guards re-conditioning with that
+   attribute, but `apply_voice_to_lease` assigns `lease.model.model.conds` directly when restoring from
+   cache, without updating it — so the wrapper's record of its own state goes stale. This is dormant
+   today only because `_generation_kwargs` never passes `audio_prompt_path`. Phase 2 rewrites the
+   wrapper and must make `_active_voice_name` the single source of truth rather than carrying both.
 
 ## Tried And Rejected
 
@@ -501,26 +540,36 @@ one-lease-per-request pool model.
 
 ### Background
 
-The primitives exist in the model code but are unwired:
+An earlier draft of this plan described Phase 3 as "wiring, not invention" on the basis that both the
+flow decoder and HiFTGAN had caches that were merely discarded. **Only half of that is true.** Corrected:
 
-- `flow.inference(..., finalize=False)` supports non-final chunks, ignoring the last 3 tokens as
-  lookahead (`models/s3gen/s3gen.py:200`).
-- `hift_inference(speech_feat, cache_source)` accepts a HiFTGAN cache for waveform continuity.
-- The sync path throws both away:
-  `# TODO jrm: ignoring the speed control (mel interpolation) and the HiFTGAN caching mechanisms for now.`
-  with `hift_cache_source` hardcoded to an empty tensor (`s3gen.py:290`), and `inference()` passing
-  `finalize=True` and `None`.
-- A docstring references an `S3GenStreamer` class that does not ship.
+What exists:
 
-So this is wiring, not invention — but the caches are precisely what prevents audible clicks at
-chunk boundaries, so it cannot be shortcut.
+- `hift.inference(speech_feat, cache_source)` genuinely has a cache, and returns the source signal `s`
+  to feed forward. Its own comment says `# use cache_source to avoid glitch`. The sync path throws it
+  away: `# TODO jrm: ignoring ... the HiFTGAN caching mechanisms for now.` with `hift_cache_source`
+  hardcoded to an empty tensor (`s3gen.py:290`).
+- `flow.inference(..., finalize=False)` trims `pre_lookahead_len * token_mel_ratio` = 6 mel frames
+  (3 tokens) off the encoder output, which is the chunk-boundary lookahead mechanism.
+
+What does **not** exist:
+
+- **A flow decoder cache.** `flow.inference` ends `return feat, None  # NOTE jrm: why are they
+  returning None here?` — there is no state to carry.
+- An `S3GenStreamer` class, despite a docstring pointing callers at one.
+
+The consequence is the main cost of the phase: without encoder caching, the flow encoder must be
+recomputed over the accumulated token prefix on every chunk, costing roughly `k/2` times the flow
+compute for `k` chunks. That is a real throughput tradeoff against latency, quantified in the phase
+plan, and it is why the chunk policy defaults to progressive sizing rather than uniform small chunks.
 
 ### Changes
 
 - Make the T3 decode loop (`models/t3/t3.py:459`) a generator yielding speech tokens.
-- Implement the streaming vocoder path: carry flow and HiFT caches across chunks, honour the
-  3-token lookahead, and apply `trim_fade` **only to the first chunk** (it is currently applied
-  unconditionally per call, which would fade in the front of every chunk).
+- Implement the streaming vocoder path: carry the HiFTGAN `cache_source` across chunks, recompute flow
+  over the accumulated prefix, track lookahead frame accounting exactly, and apply `trim_fade` **only
+  to the first chunk** (it is currently applied unconditionally per call, which would fade in the front
+  of every chunk).
 - Chunk policy: N speech tokens per emission, configurable. Start around 25 tokens (~1 s) and tune
   down; smaller chunks mean lower latency but more per-chunk flow overhead.
 - Compose with sentence splitting rather than replacing it. **Splitting stays** — not as a latency
@@ -552,7 +601,13 @@ chunk boundaries, so it cannot be shortcut.
 - Throughput at concurrency 24 is within 10% of the Phase 2 baseline.
 - Feature flag defaults off until sign-off, then flips.
 
-## Phase 4 — Consumers And Documentation
+## Phase 4 — Consumers (Not Planned Here)
+
+Phase 4 changes **glyph-gate**, a different service, so it has no plan document in this repo. The
+in-repo documentation work originally listed here has moved into Phases 1–3, each of which now updates
+the docs it invalidates.
+
+What remains for whoever owns glyph-gate, recorded so it is not lost:
 
 ### Changes
 

@@ -112,7 +112,15 @@ Run on the target NVIDIA GPU (ai-p301), not a dev machine. Per the resolved devi
 the only environment where numbers mean anything.
 
 Record alongside the results: GPU model, driver, `MODEL_INSTANCE_COUNT`, `MODEL_REPO_ID`, model
-revision, and the commit SHA under test.
+revision, the commit SHA under test, and — since `feature/multi-voice-support` adds a voice library —
+**which voice** was used and what `VOICE_LIBRARY` contained.
+
+Reference audio is voice-dependent. Pin a single voice for all baseline generation, and record it, or
+every later comparison is ambiguous.
+
+VRAM accounting also changes with multi-voice: conditionals are cached per `(voice, device)` at module
+level, so the cost scales with the number of voices rather than voices x instances. Capture VRAM with
+the full configured library warmed, not just the default voice.
 
 ### Metrics To Capture
 
@@ -285,6 +293,30 @@ about production saturation behavior.
 | Commit SHA | `055e4daf0154160c594289ba6294a570ae09a40e` |
 | GPU memory (idle, 5 instances loaded) | 16.8 GB allocated / 16.85 GB reserved (of 46 GB available on GPU 0) |
 
+### Voice Configuration
+
+`feature/multi-voice-support` is now deployed on `ai-p301`. `GET /health` confirms:
+
+```json
+"voice_library": {"mic": "/app/voices/mic-voice.wav", "nic": "/app/voices/nic-voice.wav"},
+"default_voice_name": "mic"
+```
+
+All three load-test runs below (Runs 1-3) used the **default voice, `mic`** — pinned implicitly, since
+none of the requests set `voice` explicitly until the check below. Per the plan's requirement to record
+VRAM with the full library warmed, not just the default voice, a single `voice="nic"` request was sent
+after the runs to warm its cached conditional:
+
+| | `gpu_memory_allocated_mb` | `gpu_memory_reserved_mb` |
+|---|---|---|
+| Before warming `nic` (mic-only, post Runs 1-3) | 15,565.9 | 15,688.0 |
+| After warming `nic` (one request) | 15,606.2 | 15,882.0 |
+| Delta | +40.3 MB | +194.0 MB |
+
+Confirms the plan's claim exactly: caching a second voice's conditioning tensors is a one-time,
+per-process cost of tens of MB — it does not scale with `MODEL_INSTANCE_COUNT` (5 instances here), only
+with the number of distinct voices actually requested.
+
 ### Format Facts
 
 | Path | audioFormat | bits/sample | byte rate | Matches doc expectation? |
@@ -366,6 +398,18 @@ the current stack, and both have an automated (not just manual) proof they can f
   lokalplan text via the production `ChatterboxInference.generate()` path (same class `app/core/tts_model.py`
   uses). Self-comparison (same seed, two independent generations) passes tightly; a deliberately
   silence-stripped variant is reliably caught by the silence-gap-structure check.
+
+### Reference Audio For Listening
+
+Per the plan's "Reference Audio Storage" note, generated (not committed) into the gitignored
+`tests/audio_quality/reference/audio/{mic,nic}/` — non-streaming, 32-bit float WAV, one file per corpus
+`id`. 19/20 succeeded per voice (missing `char-01.wav` in both — HTTP 400, see Run 1). Each voice
+directory also has a `_generation_manifest.jsonl` recording per-request timing, size, and voice for that
+generation pass, so a future re-generation for comparison can reproduce exact conditions.
+
+This is **not seeded** (Deliverable 4's determinism note applies) — it is a listening reference for
+Kristian's human sign-off, not a null-test fixture. Regenerate whenever a meaningful stack change (Phase
+1/2/3) needs a fresh listen; the old set is disposable, not archival.
 
 ### Deliverable 5 confirmation
 
