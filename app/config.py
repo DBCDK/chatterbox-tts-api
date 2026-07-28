@@ -33,6 +33,8 @@ class Config:
 
     # Voice and model settings
     VOICE_SAMPLE_PATH = os.getenv("VOICE_SAMPLE_PATH", "./voice-sample.mp3")
+    DEFAULT_VOICE_NAME = (os.getenv("DEFAULT_VOICE_NAME") or "mic").strip().lower()
+    VOICE_LIBRARY_RAW = (os.getenv("VOICE_LIBRARY") or "").strip()
     DEVICE_OVERRIDE = os.getenv("DEVICE", "auto")
     MODEL_CACHE_DIR = os.getenv("MODEL_CACHE_DIR", "./models")
     MODEL_SOURCE = os.getenv("MODEL_SOURCE", "default").strip().lower()
@@ -100,6 +102,33 @@ class Config:
                 code = value.lower()
                 languages[code] = code
         return languages
+
+    @classmethod
+    def _parse_voice_library(cls):
+        raw_value = cls.VOICE_LIBRARY_RAW
+        if not raw_value:
+            return {}
+
+        try:
+            parsed = json.loads(raw_value)
+        except json.JSONDecodeError:
+            return {}
+
+        if not isinstance(parsed, dict):
+            return {}
+
+        return {
+            str(name).strip().lower(): str(path).strip()
+            for name, path in parsed.items()
+            if str(name).strip() and str(path).strip()
+        }
+
+    @classmethod
+    def get_voice_library(cls):
+        """Map of voice name -> reference audio path, always including the default voice."""
+        library = {cls.DEFAULT_VOICE_NAME: cls.VOICE_SAMPLE_PATH}
+        library.update(cls._parse_voice_library())
+        return library
 
     @classmethod
     def _parse_hf_allow_patterns(cls):

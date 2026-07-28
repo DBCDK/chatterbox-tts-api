@@ -62,7 +62,7 @@ class TestSpeechEndpoint:
             "/v1/audio/speech",
             json={
                 "input": TEST_TEXTS["medium"],
-                "voice": "alloy",
+                "voice": "mic",
                 "response_format": "wav",
                 "speed": 1.0,
                 "exaggeration": 0.7,
@@ -77,7 +77,7 @@ class TestSpeechEndpoint:
 
 class TestValidation:
     def test_missing_input_returns_422(self, api_client):
-        response = api_client.post("/v1/audio/speech", json={"voice": "alloy"})
+        response = api_client.post("/v1/audio/speech", json={"voice": "mic"})
         assert response.status_code == 422
 
     def test_empty_input_returns_422(self, api_client):

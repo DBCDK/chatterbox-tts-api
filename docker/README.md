@@ -8,10 +8,15 @@ Examples:
 docker build -f docker/Dockerfile -t chatterbox-tts-api .
 ```
 
-Run a container with a mounted voice sample:
+The image bakes in the two voices from `voices/`: `mic` (`voices/mic-voice.wav`,
+the default) and `nic` (`voices/nic-voice.wav`). Select one per request via
+the `voice` field on `POST /v1/audio/speech` (unknown names fall back to `mic`).
+
+Run a container with different/additional voice samples mounted:
 
 ```bash
 docker run --rm -p 4123:4123 \
-  -v "$PWD/voice-sample.mp3:/app/voice-sample.mp3:ro" \
+  -v "$PWD/voices/mic-voice.wav:/app/voices/mic-voice.wav:ro" \
+  -v "$PWD/voices/nic-voice.wav:/app/voices/nic-voice.wav:ro" \
   chatterbox-tts-api
 ```

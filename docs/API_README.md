@@ -14,7 +14,7 @@ Request body:
 ```json
 {
   "input": "Text to convert to speech",
-  "voice": "alloy",
+  "voice": "mic",
   "response_format": "wav",
   "speed": 1.0,
   "stream_format": "audio",

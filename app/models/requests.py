@@ -5,14 +5,16 @@ Request models for API validation
 from typing import Optional
 from pydantic import BaseModel, Field, validator
 
+from app.config import Config
+
 
 class TTSRequest(BaseModel):
     """Text-to-speech request model"""
 
     input: str = Field(..., description="The text to generate audio for", min_length=1)
     voice: Optional[str] = Field(
-        "alloy",
-        description="Voice name, alias, or OpenAI-style voice name to resolve against the configured/default voice sample",
+        Config.DEFAULT_VOICE_NAME,
+        description="Voice name to resolve against the configured voice library (DEFAULT_VOICE_NAME/VOICE_LIBRARY). Unknown names fall back to the default voice.",
     )
     response_format: Optional[str] = Field(
         "wav", description="Audio format (always returns WAV)"
@@ -40,7 +42,9 @@ class TTSRequest(BaseModel):
         None, description="Minimum token probability floor", ge=0.0, lt=1.0
     )
     repetition_penalty: Optional[float] = Field(
-        None, description="Repetition penalty — 1.0 disables, >1.0 discourages repeats", ge=1.0
+        None,
+        description="Repetition penalty — 1.0 disables, >1.0 discourages repeats",
+        ge=1.0,
     )
 
     @validator("input")

@@ -18,7 +18,7 @@ ENV HOME=/home/appuser
 COPY --chown=appuser:appuser pyproject.toml uv.lock ./
 COPY --chown=appuser:appuser app/ ./app/
 COPY --chown=appuser:appuser main.py ./
-COPY --chown=appuser:appuser coral_sample.wav ./voice-sample.wav
+COPY --chown=appuser:appuser voices/ ./voices/
 
 USER appuser
 
@@ -29,7 +29,9 @@ ENV HOST=0.0.0.0
 ENV PORT=4123
 ENV DEVICE=cuda
 ENV CORS_ORIGINS=*
-ENV VOICE_SAMPLE_PATH=/app/voice-sample.wav
+ENV VOICE_SAMPLE_PATH=/app/voices/mic-voice.wav
+ENV DEFAULT_VOICE_NAME=mic
+ENV VOICE_LIBRARY="{\"mic\": \"/app/voices/mic-voice.wav\", \"nic\": \"/app/voices/nic-voice.wav\"}"
 ENV MODEL_CACHE_DIR=/cache
 ENV MODEL_SOURCE=default
 ENV MODEL_TYPE=multilingual
