@@ -17,12 +17,21 @@ class TTSRequest(BaseModel):
         description="Voice name to resolve against the configured voice library (DEFAULT_VOICE_NAME/VOICE_LIBRARY). Unknown names fall back to the default voice.",
     )
     response_format: Optional[str] = Field(
-        "wav", description="Audio format (always returns WAV)"
+        "wav",
+        description=(
+            "Sample format: 'pcm' (raw 16-bit little-endian PCM, no header) or "
+            "'wav' (streaming-safe RIFF/WAV header). Other OpenAI response_format "
+            "values (mp3, opus, aac, flac) are rejected rather than silently "
+            "returning wav."
+        ),
     )
     speed: Optional[float] = Field(1.0, description="Speed of speech (ignored)")
     stream_format: Optional[str] = Field(
-        "audio",
-        description="Streaming format: 'audio' for raw audio stream, 'sse' for Server-Side Events",
+        None,
+        description=(
+            "Streaming format: 'audio' for a genuine chunked byte stream, 'sse' for "
+            "Server-Side Events. Absent (the default) returns one buffered response."
+        ),
     )
 
     # Custom TTS parameters

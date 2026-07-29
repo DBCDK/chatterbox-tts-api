@@ -3,28 +3,33 @@ Text-to-speech endpoint.
 """
 
 import asyncio
-import base64
 import io
 import logging
-from dataclasses import dataclass
-from typing import AsyncGenerator, Optional
+from typing import Optional
 from uuid import uuid4
 
-import torch
-import torchaudio as ta
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
+from app.api.endpoints._request_context import (
+    ClientDisconnected,
+    RequestRuntimeContext,
+    RequestTimeoutExceeded,
+    _audio_num_frames,
+    _generation_kwargs,
+    _log_request_event,
+    _raise_if_request_expired,
+)
+from app.api.endpoints.speech_stream import _build_framer, generate_speech_chunks, generate_speech_sse
 from app.config import Config
+from app.core.audio import build_wav_header, pcm16_bytes
 from app.core.metrics import (
     observe_lease_acquire_failure,
     observe_request_failure,
     observe_request_finished,
     observe_request_started,
     observe_requests_waiting_for_lease,
-    observe_time_to_first_chunk,
 )
-from app.core.observability import get_logger, log_event
 from app.core.tts_model import (
     ModelLease,
     ModelNotReadyError,
@@ -37,69 +42,9 @@ from app.core.tts_model import (
     release_model_lease,
     supports_language,
 )
-from app.models import (
-    ErrorResponse,
-    SSEAudioDelta,
-    SSEAudioDone,
-    SSEAudioInfo,
-    SSEUsageInfo,
-    TTSRequest,
-)
+from app.models import ErrorResponse, TTSRequest
 
 base_router = APIRouter()
-logger = get_logger(__name__)
-
-
-class RequestTimeoutExceeded(RuntimeError):
-    """Raised when a request exceeds the configured total timeout."""
-
-    def __init__(self, stage: str):
-        super().__init__(f"Request timed out during {stage}")
-        self.stage = stage
-
-
-class ClientDisconnected(RuntimeError):
-    """Raised when the SSE client disconnects mid-request."""
-
-    def __init__(self, stage: str):
-        super().__init__(f"Client disconnected during {stage}")
-        self.stage = stage
-
-
-@dataclass
-class RequestRuntimeContext:
-    request_id: str
-    mode: str
-    started_at: float
-    deadline: float
-    client_request: Optional[Request] = None
-    lease_acquired_at: Optional[float] = None
-
-    def remaining_seconds(self) -> float:
-        return max(self.deadline - asyncio.get_running_loop().time(), 0.0)
-
-    def elapsed_seconds(self) -> float:
-        return max(asyncio.get_running_loop().time() - self.started_at, 0.0)
-
-    def lease_wait_seconds(self) -> Optional[float]:
-        if self.lease_acquired_at is None:
-            return None
-        return max(self.lease_acquired_at - self.started_at, 0.0)
-
-    def generation_elapsed_seconds(self) -> Optional[float]:
-        if self.lease_acquired_at is None:
-            return None
-        return max(asyncio.get_running_loop().time() - self.lease_acquired_at, 0.0)
-
-
-def _audio_num_frames(audio_tensor: torch.Tensor) -> int:
-    if audio_tensor.dim() == 1:
-        return int(audio_tensor.shape[0])
-    return int(audio_tensor.shape[-1])
-
-
-def _audio_duration_seconds(audio_tensor: torch.Tensor, sample_rate: int) -> float:
-    return _audio_num_frames(audio_tensor) / float(sample_rate)
 
 
 def _new_request_context(
@@ -145,42 +90,6 @@ def _request_timeout_http_error() -> HTTPException:
             }
         },
     )
-
-
-def _log_request_event(
-    level: int, message: str, context: RequestRuntimeContext, **fields
-):
-    log_event(
-        logger,
-        level,
-        message,
-        request_id=context.request_id,
-        request_mode=context.mode,
-        elapsed_seconds=round(context.elapsed_seconds(), 6),
-        route="/v1/audio/speech",
-        **fields,
-    )
-
-
-def _raise_if_request_expired(context: RequestRuntimeContext, stage: str):
-    if context.remaining_seconds() <= 0:
-        raise RequestTimeoutExceeded(stage)
-
-
-async def _raise_if_client_disconnected(
-    context: RequestRuntimeContext,
-    stage: str,
-):
-    if (
-        context.client_request is not None
-        and await context.client_request.is_disconnected()
-    ):
-        raise ClientDisconnected(stage)
-
-
-async def _guard_request_state(context: RequestRuntimeContext, stage: str):
-    _raise_if_request_expired(context, stage)
-    await _raise_if_client_disconnected(context, stage)
 
 
 async def _acquire_request_lease(context: RequestRuntimeContext) -> ModelLease:
@@ -285,6 +194,26 @@ def _validate_text_length(text: str, mode: Optional[str] = None):
         )
 
 
+def _validate_response_format(response_format: Optional[str], mode: Optional[str] = None) -> str:
+    resolved_format = (response_format or "wav").lower()
+    if resolved_format not in ("pcm", "wav"):
+        if mode is not None:
+            observe_request_failure("unsupported_response_format", "validation", mode)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": {
+                    "message": (
+                        f"Unsupported response_format: '{response_format}'. "
+                        "This service supports 'pcm' and 'wav' only."
+                    ),
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+    return resolved_format
+
+
 def resolve_voice_and_language(
     voice_name: Optional[str],
 ) -> tuple[str, Optional[str]]:
@@ -324,30 +253,6 @@ def _validate_language_for_generation(
     return resolved_language
 
 
-def _generation_kwargs(
-    text: str,
-    language_id: Optional[str],
-    exaggeration: Optional[float],
-    cfg_weight: Optional[float],
-    temperature: Optional[float],
-    top_p: Optional[float],
-    min_p: Optional[float],
-    repetition_penalty: Optional[float],
-) -> dict:
-    kwargs = {
-        "text": text,
-        "exaggeration": exaggeration if exaggeration is not None else Config.EXAGGERATION,
-        "cfg_weight": cfg_weight if cfg_weight is not None else Config.CFG_WEIGHT,
-        "temperature": temperature if temperature is not None else Config.TEMPERATURE,
-        "top_p": top_p if top_p is not None else Config.TOP_P,
-        "min_p": min_p if min_p is not None else Config.MIN_P,
-        "repetition_penalty": repetition_penalty if repetition_penalty is not None else Config.REPETITION_PENALTY,
-    }
-    if is_multilingual() and language_id:
-        kwargs["language_id"] = language_id
-    return kwargs
-
-
 async def _generate_full_audio(
     context: RequestRuntimeContext,
     lease: ModelLease,
@@ -359,150 +264,22 @@ async def _generate_full_audio(
     top_p: Optional[float],
     min_p: Optional[float],
     repetition_penalty: Optional[float],
+    response_format: str = "wav",
     voice_name: Optional[str] = None,
 ) -> tuple[io.BytesIO, float]:
+    """Exit A: buffer the same streaming source Exit B/C use, instead of a separate
+    generate() call. Gated on tests/audio_quality/test_buffered_stream_equivalence.py --
+    see that module's docstring before changing this to call generate() again."""
     _validate_text_length(text)
     _raise_if_request_expired(context, "generation")
-    loop = asyncio.get_running_loop()
 
-    def _generate():
-        if voice_name is not None:
-            apply_voice_to_lease(lease, voice_name)
-        return lease.model.generate(
-            **_generation_kwargs(
-                text=text,
-                language_id=language_id,
-                exaggeration=exaggeration,
-                cfg_weight=cfg_weight,
-                temperature=temperature,
-                top_p=top_p,
-                min_p=min_p,
-                repetition_penalty=repetition_penalty,
-            )
-        )
+    if voice_name is not None:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, apply_voice_to_lease, lease, voice_name)
 
+    pcm_chunks: list[bytes] = []
+    total_frames = 0
     try:
-        with torch.no_grad():
-            audio_tensor = await loop.run_in_executor(None, _generate)
-    except Exception as exc:
-        if is_fatal_generation_error(exc):
-            lease.mark_broken(str(exc))
-        else:
-            lease.mark_soft_failure(str(exc))
-        raise
-
-    audio_tensor = audio_tensor.detach().cpu()
-    _raise_if_request_expired(context, "response_encoding")
-    buffer = io.BytesIO()
-    ta.save(buffer, audio_tensor, lease.model.sr, format="wav")
-    buffer.seek(0)
-    return buffer, _audio_duration_seconds(audio_tensor, lease.model.sr)
-
-
-async def generate_speech_internal(
-    text: str,
-    language_id: Optional[str] = None,
-    exaggeration: Optional[float] = None,
-    cfg_weight: Optional[float] = None,
-    temperature: Optional[float] = None,
-    top_p: Optional[float] = None,
-    min_p: Optional[float] = None,
-    repetition_penalty: Optional[float] = None,
-    voice_name: Optional[str] = None,
-) -> io.BytesIO:
-    _validate_text_length(text, "audio")
-    resolved_language = _validate_language_for_generation(language_id, "audio")
-    context = _new_request_context(mode="audio")
-    observe_request_started("/v1/audio/speech", context.mode, len(text))
-    _log_request_event(
-        logging.INFO,
-        "request_started",
-        context,
-        outcome="started",
-        input_chars=len(text),
-    )
-    lease = None
-    try:
-        lease = await _acquire_request_lease(context)
-        buffer, audio_seconds = await _generate_full_audio(
-            context=context,
-            lease=lease,
-            text=text,
-            language_id=resolved_language,
-            exaggeration=exaggeration,
-            cfg_weight=cfg_weight,
-            temperature=temperature,
-            top_p=top_p,
-            min_p=min_p,
-            repetition_penalty=repetition_penalty,
-            voice_name=voice_name,
-        )
-        observe_request_finished(
-            "/v1/audio/speech",
-            context.mode,
-            "success",
-            elapsed_seconds=context.elapsed_seconds(),
-            lease_wait_seconds=context.lease_wait_seconds(),
-            generation_duration_seconds=context.generation_elapsed_seconds(),
-            audio_seconds=round(audio_seconds, 6),
-        )
-        return buffer
-    except RequestTimeoutExceeded as exc:
-        observe_request_failure("timeout", exc.stage, context.mode)
-        observe_request_finished(
-            "/v1/audio/speech",
-            context.mode,
-            "timeout",
-            elapsed_seconds=context.elapsed_seconds(),
-            lease_wait_seconds=context.lease_wait_seconds(),
-            generation_duration_seconds=context.generation_elapsed_seconds(),
-        )
-        raise
-    except Exception:
-        observe_request_failure("internal_error", "request", context.mode)
-        observe_request_finished(
-            "/v1/audio/speech",
-            context.mode,
-            "error",
-            elapsed_seconds=context.elapsed_seconds(),
-            lease_wait_seconds=context.lease_wait_seconds(),
-            generation_duration_seconds=context.generation_elapsed_seconds(),
-        )
-        raise
-    finally:
-        await release_model_lease(lease)
-
-
-async def generate_speech_sse(
-    context: RequestRuntimeContext,
-    lease: ModelLease,
-    text: str,
-    language_id: Optional[str] = None,
-    exaggeration: Optional[float] = None,
-    cfg_weight: Optional[float] = None,
-    temperature: Optional[float] = None,
-    top_p: Optional[float] = None,
-    min_p: Optional[float] = None,
-    repetition_penalty: Optional[float] = None,
-    voice_name: Optional[str] = None,
-) -> AsyncGenerator[str, None]:
-    chunk_count = 0
-    try:
-        await _guard_request_state(context, "sse_start")
-        info_event = SSEAudioInfo(
-            sample_rate=lease.model.sr,
-            channels=1,
-            bits_per_sample=16,
-        )
-        yield f"data: {info_event.model_dump_json()}\n\n"
-
-        if voice_name is not None:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, apply_voice_to_lease, lease, voice_name)
-
-        total_frames = 0
-        first_chunk_observed = False
-
         async for audio_tensor in lease.model.generate_stream_async(
             **_generation_kwargs(
                 text=text,
@@ -515,110 +292,26 @@ async def generate_speech_sse(
                 repetition_penalty=repetition_penalty,
             )
         ):
-            await _guard_request_state(context, "chunk_generation")
             audio_tensor = audio_tensor.detach().cpu()
-            if not first_chunk_observed:
-                observe_time_to_first_chunk("/v1/audio/speech", context.elapsed_seconds())
-                first_chunk_observed = True
-            chunk_count += 1
             total_frames += _audio_num_frames(audio_tensor)
-            pcm_tensor = (torch.clamp(audio_tensor, -1.0, 1.0) * 32767).to(torch.int16)
-            payload = base64.b64encode(pcm_tensor.squeeze().numpy().tobytes()).decode("ascii")
-            yield f"data: {SSEAudioDelta(audio=payload).model_dump_json()}\n\n"
-
-        await _guard_request_state(context, "done_event")
-        usage_event = SSEAudioDone(
-            usage=SSEUsageInfo(
-                input_chars=len(text),
-                audio_seconds=total_frames / float(lease.model.sr),
-            )
-        )
-        _log_request_event(
-            logging.INFO,
-            "request_completed",
-            context,
-            model_instance_id=lease.instance_id,
-            outcome="success",
-            input_chars=len(text),
-            audio_seconds=usage_event.usage.audio_seconds,
-            chunk_count=chunk_count,
-        )
-        observe_request_finished(
-            "/v1/audio/speech",
-            context.mode,
-            "success",
-            elapsed_seconds=context.elapsed_seconds(),
-            lease_wait_seconds=context.lease_wait_seconds(),
-            generation_duration_seconds=context.generation_elapsed_seconds(),
-            audio_seconds=usage_event.usage.audio_seconds,
-            chunk_count=chunk_count,
-        )
-        yield f"data: {usage_event.model_dump_json()}\n\n"
-    except RequestTimeoutExceeded as exc:
-        observe_request_failure("timeout", exc.stage, context.mode)
-        _log_request_event(
-            logging.WARNING,
-            "request_timeout",
-            context,
-            model_instance_id=lease.instance_id,
-            timeout_stage=exc.stage,
-            outcome="timeout",
-            chunk_count=chunk_count,
-        )
-        observe_request_finished(
-            "/v1/audio/speech",
-            context.mode,
-            "timeout",
-            elapsed_seconds=context.elapsed_seconds(),
-            lease_wait_seconds=context.lease_wait_seconds(),
-            generation_duration_seconds=context.generation_elapsed_seconds(),
-            chunk_count=chunk_count,
-        )
-        return
-    except ClientDisconnected as exc:
-        observe_request_failure("client_disconnect", exc.stage, context.mode)
-        _log_request_event(
-            logging.INFO,
-            "request_disconnected",
-            context,
-            model_instance_id=lease.instance_id,
-            disconnect_stage=exc.stage,
-            outcome="disconnect",
-            chunk_count=chunk_count,
-        )
-        observe_request_finished(
-            "/v1/audio/speech",
-            context.mode,
-            "disconnect",
-            elapsed_seconds=context.elapsed_seconds(),
-            lease_wait_seconds=context.lease_wait_seconds(),
-            generation_duration_seconds=context.generation_elapsed_seconds(),
-            chunk_count=chunk_count,
-        )
-        return
+            pcm_chunks.append(pcm16_bytes(audio_tensor))
     except Exception as exc:
-        observe_request_failure("internal_error", "request", context.mode)
-        _log_request_event(
-            logging.ERROR,
-            "request_failed",
-            context,
-            model_instance_id=lease.instance_id,
-            outcome="error",
-            error_type=type(exc).__name__,
-            chunk_count=chunk_count,
-        )
-        observe_request_finished(
-            "/v1/audio/speech",
-            context.mode,
-            "error",
-            elapsed_seconds=context.elapsed_seconds(),
-            lease_wait_seconds=context.lease_wait_seconds(),
-            generation_duration_seconds=context.generation_elapsed_seconds(),
-            chunk_count=chunk_count,
-        )
+        if is_fatal_generation_error(exc):
+            lease.mark_broken(str(exc))
+        else:
+            lease.mark_soft_failure(str(exc))
         raise
-    finally:
-        await release_model_lease(lease)
+
+    _raise_if_request_expired(context, "response_encoding")
+    pcm_bytes = b"".join(pcm_chunks)
+    buffer = io.BytesIO()
+    if response_format == "pcm":
+        buffer.write(pcm_bytes)
+    else:
+        buffer.write(build_wav_header(len(pcm_bytes), lease.model.sr))
+        buffer.write(pcm_bytes)
+    buffer.seek(0)
+    return buffer, total_frames / float(lease.model.sr)
 
 
 @base_router.post(
@@ -639,6 +332,7 @@ async def text_to_speech(request: TTSRequest, client_request: Request):
     request_mode = request.stream_format or "audio"
     resolved_language = _validate_language_for_generation(language_id, request_mode)
     _validate_text_length(request.input, request_mode)
+    resolved_response_format = _validate_response_format(request.response_format, request_mode)
 
     if request.stream_format == "sse":
         context = _new_request_context(mode="sse", client_request=client_request)
@@ -670,6 +364,49 @@ async def text_to_speech(request: TTSRequest, client_request: Request):
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
                 "X-Accel-Buffering": "no",
+                "X-Audio-Sample-Rate": str(lease.model.sr),
+                "X-Audio-Channels": "1",
+                "X-Audio-Bits-Per-Sample": "16",
+                "X-Model-Instance-ID": str(lease.instance_id),
+                "X-Request-ID": context.request_id,
+            },
+        )
+
+    if request.stream_format == "audio":
+        context = _new_request_context(mode="audio_stream", client_request=client_request)
+        observe_request_started("/v1/audio/speech", context.mode, len(request.input))
+        _log_request_event(
+            logging.INFO,
+            "request_started",
+            context,
+            outcome="started",
+            input_chars=len(request.input),
+        )
+        lease = await _acquire_request_lease(context)
+        framer = _build_framer(resolved_response_format, lease.model.sr)
+        return StreamingResponse(
+            generate_speech_chunks(
+                context=context,
+                lease=lease,
+                text=request.input,
+                framer=framer,
+                language_id=resolved_language,
+                exaggeration=request.exaggeration,
+                cfg_weight=request.cfg_weight,
+                temperature=request.temperature,
+                top_p=request.top_p,
+                min_p=request.min_p,
+                repetition_penalty=request.repetition_penalty,
+                voice_name=voice_name,
+            ),
+            media_type=framer.media_type,
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "X-Audio-Sample-Rate": str(lease.model.sr),
+                "X-Audio-Channels": "1",
+                "X-Audio-Bits-Per-Sample": "16",
+                "X-Usage-Input-Chars": str(len(request.input)),
                 "X-Model-Instance-ID": str(lease.instance_id),
                 "X-Request-ID": context.request_id,
             },
@@ -698,13 +435,18 @@ async def text_to_speech(request: TTSRequest, client_request: Request):
             top_p=request.top_p,
             min_p=request.min_p,
             repetition_penalty=request.repetition_penalty,
+            response_format=resolved_response_format,
             voice_name=voice_name,
         )
+        media_type = "audio/pcm" if resolved_response_format == "pcm" else "audio/wav"
         response = StreamingResponse(
-            io.BytesIO(buffer.getvalue()),
-            media_type="audio/wav",
+            buffer,
+            media_type=media_type,
             headers={
-                "Content-Disposition": "attachment; filename=speech.wav",
+                "Content-Disposition": f"attachment; filename=speech.{resolved_response_format}",
+                "X-Audio-Sample-Rate": str(lease.model.sr),
+                "X-Audio-Channels": "1",
+                "X-Audio-Bits-Per-Sample": "16",
                 "X-Usage-Input-Chars": str(len(request.input)),
                 "X-Usage-Audio-Seconds": f"{audio_seconds:.6f}",
                 "X-Model-Instance-ID": str(lease.instance_id),
@@ -782,7 +524,7 @@ __all__ = [
     "RequestRuntimeContext",
     "RequestTimeoutExceeded",
     "base_router",
-    "generate_speech_internal",
+    "generate_speech_chunks",
     "generate_speech_sse",
     "resolve_voice_and_language",
 ]

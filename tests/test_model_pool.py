@@ -1,6 +1,7 @@
 """Unit tests for Phase 1 model pooling behavior."""
 
 import asyncio
+import struct
 from itertools import count
 
 import pytest
@@ -8,6 +9,7 @@ import torch
 
 from app.api.endpoints import speech
 from app.config import Config
+from app.core.audio import PcmFramer, WavStreamFramer
 import app.core.tts_model as tts_model
 
 
@@ -124,11 +126,9 @@ def test_model_pool_limits_parallel_leases(monkeypatch):
 def test_request_failure_releases_healthy_lease(monkeypatch):
     _configure_test_pool(monkeypatch, pool_size=1)
     monkeypatch.setattr(
-        speech.ta,
-        "save",
-        lambda buffer, audio, sample_rate, format: (_ for _ in ()).throw(
-            RuntimeError("wav write failed")
-        ),
+        speech,
+        "build_wav_header",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("wav header failed")),
     )
 
     async def scenario():
@@ -136,7 +136,7 @@ def test_request_failure_releases_healthy_lease(monkeypatch):
         lease = await tts_model.acquire_model_lease(0)
         context = speech._new_request_context(mode="audio")
 
-        with pytest.raises(RuntimeError, match="wav write failed"):
+        with pytest.raises(RuntimeError, match="wav header failed"):
             await speech._generate_full_audio(
                 context=context,
                 lease=lease,
@@ -286,7 +286,6 @@ def test_successful_request_resets_failure_counter(monkeypatch):
         return FlakyModel(name, fail_count=fail_count)
 
     _configure_test_pool(monkeypatch, pool_size=1, model_factory=flaky_factory)
-    monkeypatch.setattr(speech.ta, "save", lambda buffer, audio, sr, format: buffer.write(b"wav"))
 
     async def scenario():
         await tts_model.initialize_model()
@@ -337,11 +336,6 @@ def test_successful_request_resets_failure_counter(monkeypatch):
 
 def test_non_streaming_request_keeps_one_stable_model(monkeypatch):
     _configure_test_pool(monkeypatch, pool_size=2)
-    monkeypatch.setattr(
-        speech.ta,
-        "save",
-        lambda buffer, audio, sample_rate, format: buffer.write(b"wav"),
-    )
     long_text = ("Sentence one. Sentence two. Sentence three. " * 12).strip()
 
     async def scenario():
@@ -370,6 +364,80 @@ def test_non_streaming_request_keeps_one_stable_model(monkeypatch):
         assert len(active_models) == 1
         assert active_models[0].name == f"model-{lease.instance_id}"
         assert len(active_models[0].generated_texts) >= 1
+
+    asyncio.run(scenario())
+
+
+def test_buffered_audio_emits_16bit_wav_with_real_header_size(monkeypatch):
+    """The Phase 1 bit-depth regression this whole rewrite exists to fix: the buffered
+    exit must emit 16-bit int PCM with the real (not placeholder) data size, not the
+    32-bit float ta.save used to write."""
+    _configure_test_pool(monkeypatch, pool_size=1)
+
+    async def scenario():
+        await tts_model.initialize_model()
+        lease = await tts_model.acquire_model_lease(0)
+        context = speech._new_request_context(mode="audio")
+
+        buffer, audio_seconds = await speech._generate_full_audio(
+            context=context,
+            lease=lease,
+            text="Sentence one.",
+            language_id=None,
+            exaggeration=None,
+            cfg_weight=None,
+            temperature=None,
+            top_p=None,
+            min_p=None,
+            repetition_penalty=None,
+        )
+
+        raw = buffer.getvalue()
+        header = raw[:44]
+        audio_format, channels, sample_rate, byte_rate, block_align, bits_per_sample = (
+            struct.unpack("<HHIIHH", header[20:36])
+        )
+        data_size = struct.unpack("<I", header[40:44])[0]
+
+        assert audio_format == 1  # integer PCM, not the 32-bit float ta.save wrote
+        assert bits_per_sample == 16
+        assert byte_rate == 48000
+        assert block_align == 2
+        # RecordingModel yields torch.zeros(1, 128) once -> 128 samples * 2 bytes.
+        assert data_size == 128 * 2
+        assert len(raw) == 44 + data_size  # real size, not the streaming placeholder
+        assert audio_seconds == pytest.approx(128 / 24000)
+
+        await tts_model.release_model_lease(lease)
+
+    asyncio.run(scenario())
+
+
+def test_buffered_pcm_response_format_has_no_header(monkeypatch):
+    _configure_test_pool(monkeypatch, pool_size=1)
+
+    async def scenario():
+        await tts_model.initialize_model()
+        lease = await tts_model.acquire_model_lease(0)
+        context = speech._new_request_context(mode="audio")
+
+        buffer, _ = await speech._generate_full_audio(
+            context=context,
+            lease=lease,
+            text="Sentence one.",
+            language_id=None,
+            exaggeration=None,
+            cfg_weight=None,
+            temperature=None,
+            top_p=None,
+            min_p=None,
+            repetition_penalty=None,
+            response_format="pcm",
+        )
+
+        assert len(buffer.getvalue()) == 128 * 2  # no 44-byte header
+
+        await tts_model.release_model_lease(lease)
 
     asyncio.run(scenario())
 
@@ -405,6 +473,75 @@ def test_sse_request_keeps_one_stable_model(monkeypatch):
         assert active_models[0].name == f"model-{lease.instance_id}"
         assert len(active_models[0].generated_texts) >= 1
         assert tts_model.get_pool_status()["available_instances"] == 2
+
+    asyncio.run(scenario())
+
+
+def test_audio_stream_request_emits_framed_pcm(monkeypatch):
+    _configure_test_pool(monkeypatch, pool_size=2)
+
+    async def scenario():
+        await tts_model.initialize_model()
+        lease = await tts_model.acquire_model_lease(0)
+        context = speech._new_request_context(mode="audio_stream")
+        framer = PcmFramer()
+
+        chunks = []
+        async for chunk in speech.generate_speech_chunks(
+            context=context,
+            lease=lease,
+            text="Sentence one. Sentence two. Sentence three.",
+            framer=framer,
+            language_id=None,
+            exaggeration=None,
+            cfg_weight=None,
+            temperature=None,
+            top_p=None,
+            min_p=None,
+            repetition_penalty=None,
+        ):
+            chunks.append(chunk)
+
+        # header() (empty for pcm), one frame (RecordingModel yields once), finalize() (empty).
+        assert chunks[0] == b""
+        assert len(chunks[1]) == 128 * 2  # RecordingModel yields torch.zeros(1, 128)
+        assert chunks[-1] == b""
+
+        models = [slot.model for slot in tts_model._model_pool]
+        active_models = [model for model in models if model.generated_texts]
+        assert len(active_models) == 1
+        assert tts_model.get_pool_status()["available_instances"] == 2
+
+    asyncio.run(scenario())
+
+
+def test_audio_stream_request_emits_wav_header_matching_framing_contract(monkeypatch):
+    _configure_test_pool(monkeypatch, pool_size=1)
+
+    async def scenario():
+        await tts_model.initialize_model()
+        lease = await tts_model.acquire_model_lease(0)
+        context = speech._new_request_context(mode="audio_stream")
+        framer = WavStreamFramer(sample_rate=lease.model.sr)
+
+        chunks = []
+        async for chunk in speech.generate_speech_chunks(
+            context=context,
+            lease=lease,
+            text="Sentence one.",
+            framer=framer,
+            language_id=None,
+            exaggeration=None,
+            cfg_weight=None,
+            temperature=None,
+            top_p=None,
+            min_p=None,
+            repetition_penalty=None,
+        ):
+            chunks.append(chunk)
+
+        assert len(chunks[0]) == 44  # RIFF/WAV header, unknown-length placeholders
+        assert chunks[0][:4] == b"RIFF"
 
     asyncio.run(scenario())
 
@@ -469,7 +606,6 @@ def test_slot_refreshes_after_request_threshold(monkeypatch):
     """After SLOT_REFRESH_AFTER_REQUESTS completions the slot is reloaded."""
     _configure_test_pool(monkeypatch, pool_size=1)
     monkeypatch.setattr(tts_model, "SLOT_REFRESH_AFTER_REQUESTS", 3)
-    monkeypatch.setattr(speech.ta, "save", lambda buffer, audio, sr, format: buffer.write(b"wav"))
 
     async def scenario():
         await tts_model.initialize_model()
@@ -499,7 +635,6 @@ def test_refresh_deferred_while_lock_held(monkeypatch):
     """If the reinit lock is busy, the slot is returned to the pool instead of refreshed."""
     _configure_test_pool(monkeypatch, pool_size=1)
     monkeypatch.setattr(tts_model, "SLOT_REFRESH_AFTER_REQUESTS", 2)
-    monkeypatch.setattr(speech.ta, "save", lambda buffer, audio, sr, format: buffer.write(b"wav"))
 
     async def scenario():
         await tts_model.initialize_model()
