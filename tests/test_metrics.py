@@ -167,7 +167,10 @@ def test_successful_audio_request_updates_metrics(monkeypatch):
     assert "chatterbox_tts_model_instance_load_seconds_bucket{" in metrics_text
     assert "chatterbox_tts_cpu_memory_mb " in metrics_text
     assert "chatterbox_tts_cpu_memory_percent " in metrics_text
-    assert "chatterbox_tts_gpu_memory_allocated_mb 0.0" in metrics_text
+    # Not asserted against 0.0: torch.cuda.memory_allocated() is process-global, so a
+    # shared pytest run that also exercises tests/audio_quality/ (which loads and keeps
+    # a real model alive via lru_cache) leaves this genuinely nonzero here.
+    assert "chatterbox_tts_gpu_memory_allocated_mb " in metrics_text
     assert (
         'chatterbox_tts_audio_seconds_bucket{le="0.005",mode="audio",route="/v1/audio/speech"}'
         not in metrics_text

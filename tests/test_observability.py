@@ -7,7 +7,7 @@ import logging
 
 import pytest
 
-from app.api.endpoints import speech
+from app.api.endpoints import _request_context, speech
 from app.core.observability import JsonLogFormatter, log_event
 
 
@@ -51,7 +51,7 @@ def test_json_log_formatter_outputs_structured_payload():
 
 def test_request_log_helper_emits_expected_fields(monkeypatch):
     logger, stream = _make_logger("tests.observability.request")
-    monkeypatch.setattr(speech, "logger", logger)
+    monkeypatch.setattr(_request_context, "logger", logger)
 
     async def scenario():
         context = speech._new_request_context(mode="sse")
@@ -77,7 +77,7 @@ def test_request_log_helper_emits_expected_fields(monkeypatch):
 
 def test_request_logs_do_not_include_raw_input_text(monkeypatch):
     logger, stream = _make_logger("tests.observability.no_text")
-    monkeypatch.setattr(speech, "logger", logger)
+    monkeypatch.setattr(_request_context, "logger", logger)
     sample_text = "Do not leak this request text"
 
     async def scenario():

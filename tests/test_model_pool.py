@@ -9,6 +9,7 @@ import torch
 
 from app.api.endpoints import speech
 from app.config import Config
+from app.core.audio import PcmFramer, WavStreamFramer
 import app.core.tts_model as tts_model
 
 
@@ -483,7 +484,7 @@ def test_audio_stream_request_emits_framed_pcm(monkeypatch):
         await tts_model.initialize_model()
         lease = await tts_model.acquire_model_lease(0)
         context = speech._new_request_context(mode="audio_stream")
-        framer = speech.PcmFramer()
+        framer = PcmFramer()
 
         chunks = []
         async for chunk in speech.generate_speech_chunks(
@@ -521,7 +522,7 @@ def test_audio_stream_request_emits_wav_header_matching_framing_contract(monkeyp
         await tts_model.initialize_model()
         lease = await tts_model.acquire_model_lease(0)
         context = speech._new_request_context(mode="audio_stream")
-        framer = speech.WavStreamFramer(sample_rate=lease.model.sr)
+        framer = WavStreamFramer(sample_rate=lease.model.sr)
 
         chunks = []
         async for chunk in speech.generate_speech_chunks(

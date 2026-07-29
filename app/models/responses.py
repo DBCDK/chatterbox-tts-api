@@ -55,6 +55,7 @@ class SSEAudioInfo(BaseModel):
     sample_rate: int
     channels: int
     bits_per_sample: int
+    format: str = "pcm"
 
 
 class SSEAudioDelta(BaseModel):

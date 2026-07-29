@@ -21,6 +21,7 @@ class TestSpeechStreaming:
         assert response.headers["content-type"].startswith("text/event-stream")
 
         event_types = []
+        info_event = None
         done_event = None
 
         for line in response.iter_lines(decode_unicode=True):
@@ -30,12 +31,17 @@ class TestSpeechStreaming:
             event = json.loads(line[6:])
             event_types.append(event["type"])
 
+            if event["type"] == "speech.audio.info":
+                info_event = event
             if event["type"] == "speech.audio.done":
                 done_event = event
                 break
 
         assert "speech.audio.info" in event_types
         assert "speech.audio.delta" in event_types
+        assert info_event is not None
+        assert info_event["format"] == "pcm"
+        assert info_event["bits_per_sample"] == 16
         assert done_event is not None
         assert done_event["usage"]["input_chars"] == len(TEST_TEXTS["medium"].strip())
         assert done_event["usage"]["audio_seconds"] > 0
