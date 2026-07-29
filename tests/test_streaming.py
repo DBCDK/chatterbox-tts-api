@@ -315,17 +315,27 @@ class TestDisconnectAndOverload:
     def test_overload_returns_503_before_any_bytes_sent(self, api_client):
         health = api_client.get("/health").json()
         pool_size = health["config"]["model_instance_count"]
+        # _acquire_request_lease waits up to min(MAX_QUEUE_WAIT_SECONDS, remaining
+        # deadline) for a lease before rejecting -- on a real deployment that can
+        # legitimately exceed the client's default 120s timeout under GPU contention,
+        # which reads as a bare connection timeout, not a 503. Size the client's
+        # per-request timeout off the server's own config instead of guessing.
+        client_timeout = (
+            health["config"]["request_timeout_seconds"]
+            + health["config"]["max_queue_wait_seconds"]
+            + 30
+        )
 
         def make_request(_):
             return api_client.post(
                 "/v1/audio/speech",
                 json={"input": MULTI_SENTENCE_TEXT},
+                timeout=client_timeout,
             )
 
         # One request per pool slot to occupy every instance, plus one that must
         # overflow -- MAX_QUEUE_WAIT_SECONDS on this deployment determines whether it
-        # rejects immediately or after a short queue wait, so the client timeout here
-        # is generous rather than tuned to a specific config value.
+        # rejects immediately or after a short queue wait.
         with ThreadPoolExecutor(max_workers=pool_size + 1) as pool:
             responses = list(pool.map(make_request, range(pool_size + 1)))
 
