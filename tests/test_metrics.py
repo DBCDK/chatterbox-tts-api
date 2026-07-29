@@ -108,11 +108,6 @@ def test_metrics_endpoint_returns_prometheus_payload():
 
 def test_successful_audio_request_updates_metrics(monkeypatch):
     _configure_test_pool(monkeypatch, pool_size=1)
-    monkeypatch.setattr(
-        speech.ta,
-        "save",
-        lambda buffer, audio, sample_rate, format: buffer.write(b"wav"),
-    )
 
     async def scenario():
         await tts_model.initialize_model()

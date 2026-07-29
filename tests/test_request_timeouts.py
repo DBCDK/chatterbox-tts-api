@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from app.api.endpoints import speech
 from app.config import Config
+from app.core.audio import PcmFramer
 import app.core.tts_model as tts_model
 from app.models import TTSRequest
 
@@ -87,11 +88,6 @@ def _configure_test_pool(monkeypatch, pool_size: int, model_factory=RecordingMod
 
 def test_non_streaming_timeout_returns_504_and_releases_lease(monkeypatch):
     _configure_test_pool(monkeypatch, pool_size=1, model_factory=DelayedModel)
-    monkeypatch.setattr(
-        speech.ta,
-        "save",
-        lambda buffer, audio, sample_rate, format: buffer.write(b"wav"),
-    )
     long_text = ("Sentence one. Sentence two. Sentence three. " * 12).strip()
 
     async def scenario():
@@ -196,6 +192,79 @@ def test_sse_disconnect_stops_scheduling_new_chunks(monkeypatch):
         model = tts_model._model_pool[0].model
         assert len(model.generated_texts) == 1
         assert not any("speech.audio.done" in event for event in events)
+        assert tts_model.get_pool_status()["available_instances"] == 1
+
+    asyncio.run(scenario())
+
+
+def test_audio_stream_timeout_stops_mid_stream_and_keeps_model_healthy(monkeypatch):
+    _configure_test_pool(monkeypatch, pool_size=1, model_factory=DelayedModel)
+    long_text = ("Sentence one. Sentence two. Sentence three. " * 12).strip()
+
+    async def scenario():
+        await tts_model.initialize_model()
+        context = speech._new_request_context(mode="audio_stream", client_request=FakeRequest())
+        lease = await speech._acquire_request_lease(context)
+        framer = PcmFramer()
+
+        chunks = []
+        async for chunk in speech.generate_speech_chunks(
+            context=context,
+            lease=lease,
+            text=long_text,
+            framer=framer,
+            language_id=None,
+            exaggeration=None,
+            cfg_weight=None,
+            temperature=None,
+            top_p=None,
+            min_p=None,
+            repetition_penalty=None,
+        ):
+            chunks.append(chunk)
+
+        # Header (empty for pcm) always makes it out before the timeout fires.
+        assert chunks[0] == b""
+        # Timeout means finalize() never runs, so fewer chunks than a full run.
+        assert len(chunks) < 12
+        pool_status = tts_model.get_pool_status()
+        assert pool_status["healthy_instances"] == 1
+        assert pool_status["available_instances"] == 1
+
+    asyncio.run(scenario())
+
+
+def test_audio_stream_disconnect_stops_scheduling_new_chunks(monkeypatch):
+    _configure_test_pool(monkeypatch, pool_size=1)
+    disconnecting_request = FakeRequest([False, False, False, True, True, True])
+
+    async def scenario():
+        await tts_model.initialize_model()
+        context = speech._new_request_context(
+            mode="audio_stream",
+            client_request=disconnecting_request,
+        )
+        lease = await speech._acquire_request_lease(context)
+        framer = PcmFramer()
+
+        chunks = []
+        async for chunk in speech.generate_speech_chunks(
+            context=context,
+            lease=lease,
+            text="Sentence one. Sentence two. Sentence three.",
+            framer=framer,
+            language_id=None,
+            exaggeration=None,
+            cfg_weight=None,
+            temperature=None,
+            top_p=None,
+            min_p=None,
+            repetition_penalty=None,
+        ):
+            chunks.append(chunk)
+
+        model = tts_model._model_pool[0].model
+        assert len(model.generated_texts) == 1
         assert tts_model.get_pool_status()["available_instances"] == 1
 
     asyncio.run(scenario())

@@ -46,3 +46,12 @@ class TestSpeechStreaming:
             json={"input": TEST_TEXTS["short"], "stream_format": "invalid"},
         )
         assert response.status_code == 422
+
+    def test_unsupported_response_format_returns_400(self, api_client):
+        response = api_client.post(
+            "/v1/audio/speech",
+            json={"input": TEST_TEXTS["short"], "response_format": "mp3"},
+        )
+        assert response.status_code == 400
+        body = response.json()
+        assert "mp3" in body["error"]["message"]
