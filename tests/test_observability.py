@@ -11,11 +11,6 @@ from app.api.endpoints import speech
 from app.core.observability import JsonLogFormatter, log_event
 
 
-@pytest.fixture(scope="session", autouse=True)
-def check_api_health():
-    return None
-
-
 def _make_logger(name: str) -> tuple[logging.Logger, io.StringIO]:
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)

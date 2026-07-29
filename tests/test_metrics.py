@@ -52,11 +52,6 @@ def reset_runtime_state():
     tts_model._reset_runtime_state()
 
 
-@pytest.fixture(scope="session", autouse=True)
-def check_api_health():
-    return None
-
-
 def _configure_test_pool(monkeypatch, pool_size: int, model_factory=RecordingModel):
     model_ids = count()
 
@@ -76,6 +71,7 @@ def _configure_test_pool(monkeypatch, pool_size: int, model_factory=RecordingMod
     monkeypatch.setattr(Config, "MODEL_INSTANCE_COUNT", pool_size)
     monkeypatch.setattr(Config, "MAX_QUEUE_WAIT_SECONDS", 0)
     monkeypatch.setattr(Config, "REQUEST_TIMEOUT_SECONDS", 120)
+    monkeypatch.setattr(Config, "VOICE_SAMPLE_PATH", __file__)
     monkeypatch.setattr(tts_model, "detect_device", lambda: "cpu")
     monkeypatch.setattr(tts_model, "_configure_cpu_loading", lambda device: None)
     monkeypatch.setattr(tts_model, "_load_model_sync", fake_load_model_sync)
