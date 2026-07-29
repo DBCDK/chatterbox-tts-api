@@ -38,11 +38,16 @@ from chatterbox.models.s3tokenizer import drop_invalid_tokens
 from chatterbox.mtl_tts import ChatterboxMultilingualTTS, punc_norm
 
 FLOW_SEED = 1234
-DEFAULT_VOICE_SAMPLE = os.path.join(os.path.dirname(__file__), "..", "..", "coral_sample.wav")
+# voices/mic-voice.wav is checked into git.
+DEFAULT_VOICE_SAMPLE = os.path.join(
+    os.path.dirname(__file__), "..", "..", "voices", "mic-voice.wav"
+)
 
 
 @lru_cache(maxsize=1)
-def load_model(voice_sample_path: str = DEFAULT_VOICE_SAMPLE) -> ChatterboxMultilingualTTS:
+def load_model(
+    voice_sample_path: str = DEFAULT_VOICE_SAMPLE,
+) -> ChatterboxMultilingualTTS:
     model = ChatterboxMultilingualTTS.from_pretrained(device=None)
     model.prepare_conditionals(voice_sample_path)
     return model
@@ -58,7 +63,9 @@ def generate_speech_tokens(
     T3 sampling is stochastic, so this is the only call in the pipeline not made
     deterministic by seeding alone; callers must reuse the same tensor across comparisons."""
     torch.manual_seed(seed)
-    text_tokens = model.tokenizer.text_to_tokens(punc_norm(text), language_id=language_id)
+    text_tokens = model.tokenizer.text_to_tokens(
+        punc_norm(text), language_id=language_id
+    )
     text_tokens = text_tokens.to(model.device)
     text_tokens = torch.cat([text_tokens, text_tokens], dim=0)  # CFG needs two seqs
     sot, eot = model.t3.hp.start_text_token, model.t3.hp.stop_text_token
@@ -126,7 +133,9 @@ def synthesize_chunked(
     return torch.cat(wavs, dim=-1), boundaries
 
 
-def boundary_max_deviation(reference: torch.Tensor, test: torch.Tensor, boundaries, window: int = 80):
+def boundary_max_deviation(
+    reference: torch.Tensor, test: torch.Tensor, boundaries, window: int = 80
+):
     """Max absolute sample deviation in a window around each chunk boundary. This is the
     doc-recommended check: a global average SNR hides localized clicks, so look at the
     seams specifically."""
@@ -148,7 +157,12 @@ def boundary_max_deviation(reference: torch.Tensor, test: torch.Tensor, boundari
     return results
 
 
-def segmental_snr_db(reference: torch.Tensor, test: torch.Tensor, seg_len: int = 2400, floor: float = 1e-4):
+def segmental_snr_db(
+    reference: torch.Tensor,
+    test: torch.Tensor,
+    seg_len: int = 2400,
+    floor: float = 1e-4,
+):
     """Segmental SNR over non-silent segments (doc-suggested threshold: >40 dB). Reported
     as a secondary/informational metric -- see the module docstring and test file for why
     the boundary-window check above is the primary gate."""
